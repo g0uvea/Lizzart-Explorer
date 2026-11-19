@@ -1,7 +1,44 @@
-node_modules
-.svelte-kit
-build
-storage
+# Dependencies & Lock artifacts
+node_modules/
+.pnp
+.pnp.js
+
+# SvelteKit & Build outputs
+.svelte-kit/
+build/
+dist/
+.output/
+.vercel/
+.netlify/
+.cloudflare/
+
+# Environment & Local Secrets
 .env
-.DS_Store
+.env.*
+!.env.example
+
+# User-uploaded files, avatars, resumable chunks & local data
+storage/
+*.part
+
+# Logs & Diagnostics
 *.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+bun-debug.log*
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test & Coverage outputs
+coverage/
+test-results/
+playwright-report/
