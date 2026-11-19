@@ -1,25 +1,33 @@
 import { redirect, type Handle } from '@sveltejs/kit';
 import { ensureDatabaseReady, hasAnyAdmin } from '$lib/server/db';
-import { SESSION_COOKIE_NAME, validateSession, clearSessionCookie } from '$lib/server/auth';
+import {
+	ACCESS_COOKIE_NAME,
+	REFRESH_COOKIE_NAME,
+	authenticateRequest,
+	clearSessionCookie
+} from '$lib/server/auth';
+import { applySecurityHeaders } from '$lib/server/security';
 
 export const handle: Handle = async ({ event, resolve }) => {
 	await ensureDatabaseReady();
 
-	const sessionId = event.cookies.get(SESSION_COOKIE_NAME) ?? null;
 	event.locals.user = null;
 	event.locals.sessionId = null;
 
-	if (sessionId) {
-		const user = await validateSession(sessionId);
-		if (user) {
-			event.locals.user = user;
-			event.locals.sessionId = sessionId;
+	const hasAnyCookie =
+		Boolean(event.cookies.get(ACCESS_COOKIE_NAME)) ||
+		Boolean(event.cookies.get(REFRESH_COOKIE_NAME));
+
+	if (hasAnyCookie) {
+		const auth = await authenticateRequest(event.cookies);
+		if (auth) {
+			event.locals.user = auth.user;
+			event.locals.sessionId = auth.sessionId;
 		} else {
 			clearSessionCookie(event.cookies);
 		}
 	}
 
-	// If no admin exists yet in the database, force initial setup for page routes
 	const pathname = event.url.pathname;
 	const isApiOrStatic = pathname.startsWith('/api/') || pathname.startsWith('/_app/');
 	if (!isApiOrStatic && pathname !== '/setup') {
@@ -29,5 +37,6 @@ export const handle: Handle = async ({ event, resolve }) => {
 		}
 	}
 
-	return resolve(event);
+	const response = await resolve(event);
+	return applySecurityHeaders(response, pathname);
 };

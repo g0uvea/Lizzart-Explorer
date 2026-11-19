@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { toast } from '$lib/stores/toast.svelte';
 	import { themeStore } from '$lib/stores/theme.svelte';
@@ -20,7 +21,9 @@
 		LayoutGrid,
 		List,
 		Minimize2,
-		Check
+		Check,
+		MonitorSmartphone,
+		LogOut
 	} from 'lucide-svelte';
 
 	let { data } = $props();
@@ -51,6 +54,52 @@
 	let totpCode = $state('');
 	let totpDisablePass = $state('');
 	let totpBusy = $state(false);
+
+	// Active JWT/Refresh sessions
+	interface SessionItem {
+		id: string;
+		ip_address: string;
+		user_agent: string;
+		last_used_at: string;
+		created_at: string;
+		expires_at: string;
+		is_current: boolean;
+	}
+	let activeSessions = $state<SessionItem[]>([]);
+	let loadingSessions = $state(false);
+
+	async function loadSessions() {
+		loadingSessions = true;
+		try {
+			const res = await fetch('/api/auth/sessions');
+			if (res.ok) {
+				const d = await res.json();
+				activeSessions = d.sessions;
+			}
+		} finally {
+			loadingSessions = false;
+		}
+	}
+
+	async function revokeSession(id: string) {
+		const res = await fetch(`/api/auth/sessions?id=${encodeURIComponent(id)}`, {
+			method: 'DELETE'
+		});
+		if (res.ok) {
+			toast.info('Sessão encerrada.');
+			await loadSessions();
+		}
+	}
+
+	async function revokeOtherSessions() {
+		const res = await fetch('/api/auth/sessions?others=1', { method: 'DELETE' });
+		if (res.ok) {
+			toast.success('Todos os outros dispositivos foram desconectados.');
+			await loadSessions();
+		}
+	}
+
+	onMount(loadSessions);
 
 	$effect(() => {
 		firstName = data.user.first_name;
@@ -562,6 +611,69 @@
 					{/if}
 				</div>
 			</div>
+		</div>
+
+		<!-- Active JWT & Refresh Sessions -->
+		<div class="mt-6 rounded-2xl border border-[#1f2d45] bg-[#131c2e] p-5 sm:p-6">
+			<div class="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[#1f2d45] pb-3.5">
+				<div class="flex items-center gap-2">
+					<MonitorSmartphone class="h-4 w-4 text-accent-400" />
+					<div>
+						<h3 class="text-sm font-semibold text-white">Sessões Ativas (JWT + Refresh Rotation)</h3>
+						<p class="text-xs text-slate-400">
+							Tokens JWT HS256 (15 min) com rotação de refresh token em hash SHA-256 no MariaDB.
+						</p>
+					</div>
+				</div>
+				{#if activeSessions.filter((s) => !s.is_current).length > 0}
+					<button
+						type="button"
+						onclick={revokeOtherSessions}
+						class="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-300 hover:bg-rose-500/20"
+					>
+						<LogOut class="h-3.5 w-3.5" />
+						Encerrar outros dispositivos
+					</button>
+				{/if}
+			</div>
+
+			{#if loadingSessions}
+				<p class="py-4 text-center text-xs text-slate-400">Carregando sessões...</p>
+			{:else if activeSessions.length === 0}
+				<p class="py-4 text-center text-xs text-slate-500">Nenhuma sessão ativa encontrada.</p>
+			{:else}
+				<div class="space-y-2.5">
+					{#each activeSessions as sess (sess.id)}
+						<div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#1f2d45] bg-[#0e1525] px-4 py-3 text-xs">
+							<div class="min-w-0 flex-1">
+								<div class="flex flex-wrap items-center gap-2">
+									<span class="font-mono font-semibold text-slate-200">{sess.ip_address}</span>
+									{#if sess.is_current}
+										<span class="rounded-full bg-accent-500/20 px-2 py-0.5 text-[10px] font-semibold text-accent-300">
+											Dispositivo atual
+										</span>
+									{/if}
+								</div>
+								<p class="mt-0.5 truncate text-[11px] text-slate-400" title={sess.user_agent}>
+									{sess.user_agent}
+								</p>
+								<p class="mt-0.5 text-[10px] text-slate-500">
+									Iniciada em {formatDate(sess.created_at)} • Última atividade: {formatDate(sess.last_used_at)}
+								</p>
+							</div>
+							{#if !sess.is_current}
+								<button
+									type="button"
+									onclick={() => revokeSession(sess.id)}
+									class="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-[11px] font-medium text-rose-300 hover:bg-rose-500/20"
+								>
+									Revogar
+								</button>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
 		</div>
 	{:else}
 		<!-- APPEARANCE TAB -->

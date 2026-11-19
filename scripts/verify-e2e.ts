@@ -16,10 +16,16 @@ import { generateTotpCode } from '../src/lib/server/totp';
 const BASE = process.env.TEST_BASE_URL || 'http://127.0.0.1:4173';
 
 function extractCookie(res: Response): string {
+	const list = res.headers.getSetCookie?.() || [];
+	if (list.length > 0) {
+		return list.map((c) => c.split(';')[0]).join('; ');
+	}
 	const setCookie = res.headers.get('set-cookie');
 	if (!setCookie) throw new Error('Expected Set-Cookie header');
 	return setCookie.split(';')[0];
 }
+
+const ORIGIN_HEADERS = { Origin: BASE };
 
 async function assertOk(res: Response, label: string) {
 	if (!res.ok) {
@@ -36,7 +42,7 @@ async function run() {
 	const setupRes = await assertOk(
 		await fetch(`${BASE}/api/auth/setup`, {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json', ...ORIGIN_HEADERS },
 			body: JSON.stringify({
 				username: 'admin_e2e',
 				first_name: 'João',
@@ -47,7 +53,22 @@ async function run() {
 		'First-run setup'
 	);
 	const adminCookie = extractCookie(setupRes);
-	console.log('[E2E v2] 1. First-run admin setup succeeded (@admin_e2e)');
+	if (!adminCookie.includes('lizzart_access=') || !adminCookie.includes('lizzart_refresh=')) {
+		throw new Error(`Expected JWT dual cookies, got: ${adminCookie}`);
+	}
+	if (setupRes.headers.get('x-content-type-options') !== 'nosniff') {
+		throw new Error('Missing X-Content-Type-Options security header');
+	}
+	const sessList = await (
+		await assertOk(
+			await fetch(`${BASE}/api/auth/sessions`, { headers: { Cookie: adminCookie } }),
+			'List active JWT sessions'
+		)
+	).json();
+	if (!sessList.sessions || sessList.sessions.length < 1) {
+		throw new Error('Expected at least 1 active JWT session');
+	}
+	console.log('[E2E v2] 1. First-run setup, JWT HS256 + Refresh cookies, security headers & sessions OK');
 
 	// Verify pure start (0 files/folders and 0 minecraft instances)
 	const initialFiles = await (

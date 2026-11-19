@@ -3,15 +3,22 @@ import type { RequestHandler } from './$types';
 import crypto from 'node:crypto';
 import { getPool, hasAnyAdmin } from '$lib/server/db';
 import { hashPassword } from '$lib/server/crypto';
+import { checkRateLimit } from '$lib/server/security';
 import {
 	createSession,
 	isValidUsername,
 	logAudit,
 	normalizeUsername,
-	setSessionCookie
+	setAuthCookies
 } from '$lib/server/auth';
 
 export const POST: RequestHandler = async ({ request, cookies, getClientAddress }) => {
+	const ip = getClientAddress();
+	const rate = checkRateLimit(`setup:${ip}`, 10, 5 * 60 * 1000);
+	if (!rate.allowed) {
+		return json({ error: 'Muitas tentativas. Aguarde alguns instantes.' }, { status: 429 });
+	}
+
 	const adminExists = await hasAnyAdmin();
 	if (adminExists) {
 		return json(
@@ -28,7 +35,10 @@ export const POST: RequestHandler = async ({ request, cookies, getClientAddress 
 
 	if (!isValidUsername(username)) {
 		return json(
-			{ error: 'Usuário inválido. Use 3 a 32 caracteres (letras minúsculas, números, ponto, hífen ou _).' },
+			{
+				error:
+					'Usuário inválido. Use 3 a 32 caracteres (letras minúsculas, números, ponto, hífen ou _).'
+			},
 			{ status: 400 }
 		);
 	}
@@ -43,17 +53,15 @@ export const POST: RequestHandler = async ({ request, cookies, getClientAddress 
 	const adminId = crypto.randomUUID();
 	const passwordHash = await hashPassword(password);
 
-	// Pure initialization: no starter folders, files, or Minecraft instances
 	await db.query(
 		`INSERT INTO users (id, username, first_name, last_name, password_hash, role, quota_bytes, used_bytes, is_active, avatar_color, accent_color, layout_density)
 		 VALUES (?, ?, ?, ?, ?, 'admin', -1, 0, 1, '#10b981', '#10b981', 'normal')`,
 		[adminId, username, firstName, lastName, passwordHash]
 	);
 
-	const ip = getClientAddress();
 	const ua = request.headers.get('user-agent');
-	const { sessionId, expiresAt } = await createSession(adminId, ip, ua);
-	setSessionCookie(cookies, sessionId, expiresAt);
+	const { accessJwt, refreshToken, expiresAt } = await createSession(adminId, 'admin', ip, ua);
+	setAuthCookies(cookies, accessJwt, refreshToken, expiresAt);
 
 	await logAudit({
 		userId: adminId,

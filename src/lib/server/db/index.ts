@@ -155,13 +155,16 @@ async function initializeDatabase(): Promise<void> {
 
 	await db.query(`
 		CREATE TABLE IF NOT EXISTS sessions (
-			id VARCHAR(128) NOT NULL,
+			id CHAR(36) NOT NULL,
 			user_id CHAR(36) NOT NULL,
+			refresh_token_hash CHAR(64) NOT NULL,
 			ip_address VARCHAR(64) NULL,
 			user_agent VARCHAR(255) NULL,
+			last_used_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			expires_at DATETIME NOT NULL,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (id),
+			UNIQUE KEY uq_sessions_refresh_hash (refresh_token_hash),
 			KEY idx_sessions_user (user_id),
 			KEY idx_sessions_expires (expires_at),
 			CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE

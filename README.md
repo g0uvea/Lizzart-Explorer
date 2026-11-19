@@ -5,6 +5,10 @@ Sistema completo de **Armazenamento de Arquivos em Nuvem** construído com **Bun
 ## Recursos Principais
 
 - **Primeira Inicialização (`/setup`)**: Quando não existe nenhum administrador no MariaDB, o sistema abre automaticamente o assistente para criar o primeiro Admin. Novas contas de usuários só podem ser criadas por administradores (sem registro público).
+- **Segurança Moderna (JWT + Hardening)**:
+  - Autenticação dual-token: **Access Token JWT (HS256, 15 min)** + **Refresh Token opaco com rotação automática** armazenado em hash **SHA-256** no MariaDB (nunca em texto puro), ambos em cookies `HttpOnly` + `SameSite=Lax`.
+  - Gerenciamento de **Sessões Ativas** na aba Conta (revogar dispositivos individuais ou todos os outros).
+  - **Rate Limiting** contra força bruta em login/setup/links com senha, proteção **CSRF** nativa e headers HTTP de segurança (`CSP`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `COOP`).
 - **Contas por `@usuário` + 2FA Local + Avatar**:
   - Login por **usuário** (imutável após criado), com **Nome** e **Sobrenome** mutáveis pelo usuário.
   - Upload de imagem para foto de perfil.

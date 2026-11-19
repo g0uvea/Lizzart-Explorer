@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import type { RowDataPacket } from 'mysql2/promise';
 import { getPool } from '$lib/server/db';
 import { verifyPassword } from '$lib/server/crypto';
+import { checkRateLimit } from '$lib/server/security';
 
 export const GET: RequestHandler = async ({ params }) => {
 	const db = getPool();
@@ -44,7 +45,14 @@ export const GET: RequestHandler = async ({ params }) => {
 	});
 };
 
-export const POST: RequestHandler = async ({ params, request }) => {
+export const POST: RequestHandler = async ({ params, request, getClientAddress }) => {
+	const rate = checkRateLimit(`share:${getClientAddress()}:${params.token}`, 12, 5 * 60 * 1000);
+	if (!rate.allowed) {
+		return json(
+			{ error: `Muitas tentativas de senha. Aguarde ${rate.retryAfterSec}s.` },
+			{ status: 429 }
+		);
+	}
 	const body = await request.json().catch(() => null);
 	const password = String(body?.password || '');
 
