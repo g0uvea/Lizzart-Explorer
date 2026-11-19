@@ -7,16 +7,42 @@ import type { SafeUser, SystemSettings } from '$lib/types';
 export const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'lizzart_session';
 const SESSION_TTL_DAYS = Number(process.env.SESSION_TTL_DAYS || 7);
 
+export const MIN_USER_QUOTA_GB = 10;
+
+export function normalizeUsername(raw: string): string {
+	return raw.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+}
+
+export function isValidUsername(username: string): boolean {
+	return /^[a-z0-9][a-z0-9._-]{2,31}$/.test(username);
+}
+
 export function mapUserRow(row: RowDataPacket): SafeUser {
+	const first = String(row.first_name || '').trim();
+	const last = String(row.last_name || '').trim();
+	const full = `${first} ${last}`.trim() || String(row.username);
+
 	return {
 		id: String(row.id),
-		name: String(row.name),
-		email: String(row.email),
+		username: String(row.username),
+		first_name: first,
+		last_name: last,
+		full_name: full,
 		role: row.role === 'admin' ? 'admin' : 'user',
 		quota_bytes: Number(row.quota_bytes),
 		used_bytes: Number(row.used_bytes),
 		is_active: Boolean(row.is_active),
-		avatar_color: String(row.avatar_color || '#6366f1'),
+		avatar_color: String(row.avatar_color || '#10b981'),
+		avatar_url: row.avatar_path ? `/api/auth/avatar/${row.id}?v=${encodeURIComponent(String(row.avatar_path))}` : null,
+		accent_color: String(row.accent_color || '#10b981'),
+		layout_density: row.layout_density === 'compact' ? 'compact' : 'normal',
+		default_view_mode: row.default_view_mode === 'list' ? 'list' : 'grid',
+		default_sort_by:
+			row.default_sort_by === 'date' || row.default_sort_by === 'size'
+				? row.default_sort_by
+				: 'name',
+		default_sort_dir: row.default_sort_dir === 'desc' ? 'desc' : 'asc',
+		totp_enabled: Boolean(row.totp_enabled),
 		created_at:
 			row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at)
 	};
@@ -60,7 +86,9 @@ export async function validateSession(sessionId: string): Promise<SafeUser | nul
 	const db = getPool();
 
 	const [rows] = await db.query<RowDataPacket[]>(
-		`SELECT u.id, u.name, u.email, u.role, u.quota_bytes, u.used_bytes, u.is_active, u.avatar_color, u.created_at, s.expires_at
+		`SELECT u.id, u.username, u.first_name, u.last_name, u.role, u.quota_bytes, u.used_bytes,
+		        u.is_active, u.avatar_color, u.avatar_path, u.accent_color, u.layout_density,
+		        u.default_view_mode, u.default_sort_by, u.default_sort_dir, u.totp_enabled, u.created_at, s.expires_at
 		 FROM sessions s
 		 INNER JOIN users u ON u.id = s.user_id
 		 WHERE s.id = ?
@@ -126,8 +154,7 @@ export async function getSystemSettings(): Promise<SystemSettings> {
 	}
 
 	return {
-		allow_registration: map.get('allow_registration') !== 'false',
-		default_quota_gb: Number(map.get('default_quota_gb') ?? 10) || 10,
-		max_upload_mb: Number(map.get('max_upload_mb') ?? 512) || 512
+		default_quota_gb: Math.max(MIN_USER_QUOTA_GB, Number(map.get('default_quota_gb') ?? 10) || 10),
+		max_upload_mb: Number(map.get('max_upload_mb') ?? 10240) || 10240
 	};
 }

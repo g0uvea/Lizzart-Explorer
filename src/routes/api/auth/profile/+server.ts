@@ -9,9 +9,10 @@ export const PATCH: RequestHandler = async ({ locals, request, getClientAddress 
 	if (!locals.user) return json({ error: 'Não autenticado.' }, { status: 401 });
 
 	const body = await request.json().catch(() => null);
+	if (!body) return json({ error: 'Dados inválidos.' }, { status: 400 });
 	const db = getPool();
 
-	if (body?.currentPassword && body?.newPassword) {
+	if (body.currentPassword && body.newPassword) {
 		const newPassword = String(body.newPassword);
 		if (newPassword.length < 6) {
 			return json({ error: 'A nova senha deve ter pelo menos 6 caracteres.' }, { status: 400 });
@@ -37,21 +38,64 @@ export const PATCH: RequestHandler = async ({ locals, request, getClientAddress 
 		return json({ ok: true });
 	}
 
-	const name = String(body?.name ?? locals.user.name).trim();
-	const avatarColor = String(body?.avatar_color ?? locals.user.avatar_color).trim();
+	const firstName =
+		body.first_name !== undefined ? String(body.first_name).trim() : locals.user.first_name;
+	const lastName =
+		body.last_name !== undefined ? String(body.last_name).trim() : locals.user.last_name;
+	const avatarColor =
+		typeof body.avatar_color === 'string' && /^#[0-9a-fA-F]{6}$/.test(body.avatar_color)
+			? body.avatar_color
+			: locals.user.avatar_color;
+	const accentColor =
+		typeof body.accent_color === 'string' && /^#[0-9a-fA-F]{6}$/.test(body.accent_color)
+			? body.accent_color
+			: locals.user.accent_color;
+	const layoutDensity =
+		body.layout_density === 'compact' || body.layout_density === 'normal'
+			? body.layout_density
+			: locals.user.layout_density;
+	const defaultViewMode =
+		body.default_view_mode === 'grid' || body.default_view_mode === 'list'
+			? body.default_view_mode
+			: locals.user.default_view_mode;
+	const defaultSortBy =
+		body.default_sort_by === 'name' ||
+		body.default_sort_by === 'date' ||
+		body.default_sort_by === 'size'
+			? body.default_sort_by
+			: locals.user.default_sort_by;
+	const defaultSortDir =
+		body.default_sort_dir === 'asc' || body.default_sort_dir === 'desc'
+			? body.default_sort_dir
+			: locals.user.default_sort_dir;
 
-	if (name.length < 2) {
-		return json({ error: 'Nome inválido.' }, { status: 400 });
+	if (firstName.length < 2 || lastName.length < 2) {
+		return json({ error: 'Nome e Sobrenome devem ter pelo menos 2 caracteres.' }, { status: 400 });
 	}
 
-	await db.query('UPDATE users SET name = ?, avatar_color = ? WHERE id = ?', [
-		name,
-		avatarColor,
-		locals.user.id
-	]);
+	await db.query(
+		`UPDATE users
+		 SET first_name = ?, last_name = ?, avatar_color = ?, accent_color = ?,
+		     layout_density = ?, default_view_mode = ?, default_sort_by = ?, default_sort_dir = ?
+		 WHERE id = ?`,
+		[
+			firstName,
+			lastName,
+			avatarColor,
+			accentColor,
+			layoutDensity,
+			defaultViewMode,
+			defaultSortBy,
+			defaultSortDir,
+			locals.user.id
+		]
+	);
 
 	const [updated] = await db.query<RowDataPacket[]>(
-		'SELECT id, name, email, role, quota_bytes, used_bytes, is_active, avatar_color, created_at FROM users WHERE id = ?',
+		`SELECT id, username, first_name, last_name, role, quota_bytes, used_bytes, is_active,
+		        avatar_color, avatar_path, accent_color, layout_density,
+		        default_view_mode, default_sort_by, default_sort_dir, totp_enabled, created_at
+		 FROM users WHERE id = ?`,
 		[locals.user.id]
 	);
 

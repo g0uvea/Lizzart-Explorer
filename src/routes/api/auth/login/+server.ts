@@ -3,35 +3,54 @@ import type { RequestHandler } from './$types';
 import type { RowDataPacket } from 'mysql2/promise';
 import { getPool } from '$lib/server/db';
 import { verifyPassword } from '$lib/server/crypto';
-import { createSession, logAudit, mapUserRow, setSessionCookie } from '$lib/server/auth';
+import { verifyTotpCode } from '$lib/server/totp';
+import {
+	createSession,
+	logAudit,
+	mapUserRow,
+	normalizeUsername,
+	setSessionCookie
+} from '$lib/server/auth';
 
 export const POST: RequestHandler = async ({ request, cookies, getClientAddress }) => {
 	const body = await request.json().catch(() => null);
-	const email = String(body?.email || '').trim().toLowerCase();
+	const username = normalizeUsername(String(body?.username || ''));
 	const password = String(body?.password || '');
+	const totpCode = String(body?.totpCode || '').trim();
 
-	if (!email || !password) {
-		return json({ error: 'Informe e-mail e senha.' }, { status: 400 });
+	if (!username || !password) {
+		return json({ error: 'Informe usuário e senha.' }, { status: 400 });
 	}
 
 	const db = getPool();
 	const [rows] = await db.query<RowDataPacket[]>(
-		'SELECT * FROM users WHERE email = ? LIMIT 1',
-		[email]
+		'SELECT * FROM users WHERE username = ? LIMIT 1',
+		[username]
 	);
 
 	if (rows.length === 0) {
-		return json({ error: 'Credenciais inválidas.' }, { status: 401 });
+		return json({ error: 'Usuário ou senha inválidos.' }, { status: 401 });
 	}
 
 	const userRow = rows[0];
 	if (!userRow.is_active) {
-		return json({ error: 'Esta conta está desativada. Contate um administrador.' }, { status: 403 });
+		return json({ error: 'Esta conta está suspensa. Contate um administrador.' }, { status: 403 });
 	}
 
 	const valid = await verifyPassword(password, String(userRow.password_hash));
 	if (!valid) {
-		return json({ error: 'Credenciais inválidas.' }, { status: 401 });
+		return json({ error: 'Usuário ou senha inválidos.' }, { status: 401 });
+	}
+
+	// Local 2FA TOTP check
+	if (userRow.totp_enabled && userRow.totp_secret) {
+		if (!totpCode) {
+			return json({ requires2fa: true });
+		}
+		const totpOk = verifyTotpCode(String(userRow.totp_secret), totpCode);
+		if (!totpOk) {
+			return json({ error: 'Código 2FA inválido ou expirado.', requires2fa: true }, { status: 401 });
+		}
 	}
 
 	const ip = getClientAddress();
@@ -44,7 +63,7 @@ export const POST: RequestHandler = async ({ request, cookies, getClientAddress 
 		action: 'auth.login',
 		targetType: 'user',
 		targetId: String(userRow.id),
-		details: `Login realizado (${email})`,
+		details: `Login realizado (@${username}${userRow.totp_enabled ? ' com 2FA' : ''})`,
 		ipAddress: ip
 	});
 

@@ -1,5 +1,6 @@
--- Lizzart Explorer - MariaDB Schema
--- Banco de metadados, usuários, permissões, compartilhamentos, auditoria e casca Minecraft
+-- Lizzart Explorer - MariaDB Schema v2
+-- Usuários por username (imutável) + nome/sobrenome, 2FA TOTP local, avatares, cor de tema global,
+-- uploads retomáveis em chunks, permissões, compartilhamentos, auditoria e casca Minecraft
 
 CREATE DATABASE IF NOT EXISTS `lizzart_explorer`
   CHARACTER SET utf8mb4
@@ -9,18 +10,27 @@ USE `lizzart_explorer`;
 
 CREATE TABLE IF NOT EXISTS `users` (
   `id` CHAR(36) NOT NULL,
-  `name` VARCHAR(120) NOT NULL,
-  `email` VARCHAR(190) NOT NULL,
+  `username` VARCHAR(64) NOT NULL,
+  `first_name` VARCHAR(80) NOT NULL,
+  `last_name` VARCHAR(80) NOT NULL,
   `password_hash` VARCHAR(255) NOT NULL,
   `role` ENUM('admin', 'user') NOT NULL DEFAULT 'user',
   `quota_bytes` BIGINT NOT NULL DEFAULT 10737418240,
   `used_bytes` BIGINT NOT NULL DEFAULT 0,
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
-  `avatar_color` VARCHAR(32) NOT NULL DEFAULT '#6366f1',
+  `avatar_color` VARCHAR(32) NOT NULL DEFAULT '#10b981',
+  `avatar_path` VARCHAR(255) NULL,
+  `accent_color` VARCHAR(32) NOT NULL DEFAULT '#10b981',
+  `layout_density` ENUM('normal', 'compact') NOT NULL DEFAULT 'normal',
+  `default_view_mode` ENUM('grid', 'list') NOT NULL DEFAULT 'grid',
+  `default_sort_by` ENUM('name', 'date', 'size') NOT NULL DEFAULT 'name',
+  `default_sort_dir` ENUM('asc', 'desc') NOT NULL DEFAULT 'asc',
+  `totp_secret` VARCHAR(128) NULL,
+  `totp_enabled` TINYINT(1) NOT NULL DEFAULT 0,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_users_email` (`email`)
+  UNIQUE KEY `uq_users_username` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `sessions` (
@@ -58,6 +68,26 @@ CREATE TABLE IF NOT EXISTS `storage_nodes` (
   KEY `idx_nodes_name` (`name`),
   CONSTRAINT `fk_nodes_owner` FOREIGN KEY (`owner_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_nodes_parent` FOREIGN KEY (`parent_id`) REFERENCES `storage_nodes` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `upload_sessions` (
+  `id` CHAR(36) NOT NULL,
+  `user_id` CHAR(36) NOT NULL,
+  `owner_id` CHAR(36) NOT NULL,
+  `parent_id` CHAR(36) NULL,
+  `fingerprint` VARCHAR(255) NOT NULL,
+  `file_name` VARCHAR(255) NOT NULL,
+  `mime_type` VARCHAR(190) NOT NULL DEFAULT 'application/octet-stream',
+  `total_bytes` BIGINT NOT NULL,
+  `uploaded_bytes` BIGINT NOT NULL DEFAULT 0,
+  `temp_path` VARCHAR(512) NOT NULL,
+  `status` ENUM('uploading', 'completed', 'aborted') NOT NULL DEFAULT 'uploading',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_upload_lookup` (`user_id`, `fingerprint`, `status`),
+  CONSTRAINT `fk_upload_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_upload_owner` FOREIGN KEY (`owner_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `node_permissions` (
@@ -120,7 +150,7 @@ CREATE TABLE IF NOT EXISTS `mc_servers` (
   `name` VARCHAR(120) NOT NULL,
   `description` VARCHAR(255) NULL,
   `version` VARCHAR(32) NOT NULL DEFAULT '1.21.4',
-  `edition_label` VARCHAR(32) NOT NULL DEFAULT 'Vanilla',
+  `edition_label` VARCHAR(32) NOT NULL DEFAULT 'Interface Casca',
   `host_port` INT NOT NULL DEFAULT 25565,
   `max_players` INT NOT NULL DEFAULT 20,
   `allocated_ram_mb` INT NOT NULL DEFAULT 4096,

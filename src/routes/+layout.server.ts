@@ -1,10 +1,9 @@
 import type { LayoutServerLoad } from './$types';
-import { getSystemSettings } from '$lib/server/auth';
+import { hasAnyAdmin } from '$lib/server/db';
 
 export const load: LayoutServerLoad = async ({ locals }) => {
-	const settings = await getSystemSettings();
 	return {
 		user: locals.user,
-		allowRegistration: settings.allow_registration
+		hasAdmin: await hasAnyAdmin()
 	};
 };
