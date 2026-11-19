@@ -11,6 +11,9 @@
 	});
 </script>
 
+<!-- Disable native browser context menu globally across the entire application -->
+<svelte:window oncontextmenu={(e) => e.preventDefault()} />
+
 {@render children()}
 <TransferQueue />
 <ToastContainer />

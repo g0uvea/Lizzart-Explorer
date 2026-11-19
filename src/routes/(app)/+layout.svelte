@@ -3,6 +3,7 @@
 	import { goto, invalidateAll } from '$app/navigation';
 	import { quotaStore } from '$lib/stores/quota.svelte';
 	import { themeStore } from '$lib/stores/theme.svelte';
+	import { dragStore, LIZZART_DRAG_MIME } from '$lib/stores/drag.svelte';
 	import { toast } from '$lib/stores/toast.svelte';
 	import { formatBytes, getInitials } from '$lib/utils';
 	import {
@@ -22,6 +23,7 @@
 
 	let { data, children } = $props();
 	let mobileOpen = $state(false);
+	let sidebarDropTarget = $state<'root' | 'starred' | 'trash' | null>(null);
 
 	$effect(() => {
 		if (data.user) {
@@ -33,11 +35,9 @@
 	let currentPath = $derived($page.url.pathname);
 	let currentView = $derived($page.url.searchParams.get('view') || 'drive');
 
-	// Fix storage bar bug: 0 bytes used ALWAYS shows 0% empty bar!
 	let quotaBarPercent = $derived.by(() => {
 		if (quotaStore.usedBytes <= 0) return 0;
 		if (quotaStore.quotaBytes < 0) {
-			// Unlimited quota with active files: gentle logarithmic visual bar
 			return Math.min(100, Math.max(3, Math.round(Math.log10(quotaStore.usedBytes / 1024 + 1) * 12)));
 		}
 		if (quotaStore.quotaBytes === 0) return 0;
@@ -49,6 +49,64 @@
 			return currentPath === '/' && currentView === (view || 'drive');
 		}
 		return currentPath.startsWith(path);
+	}
+
+	function onNavDragOver(e: DragEvent, target: 'root' | 'starred' | 'trash') {
+		if (!dragStore.active && !e.dataTransfer?.types.includes(LIZZART_DRAG_MIME)) return;
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		sidebarDropTarget = target;
+	}
+
+	async function onNavDrop(e: DragEvent, target: 'root' | 'starred' | 'trash') {
+		e.preventDefault();
+		sidebarDropTarget = null;
+		const items = [...dragStore.draggingNodes];
+		dragStore.end();
+		if (items.length === 0) return;
+
+		if (target === 'root') {
+			for (const item of items) {
+				if (item.permission !== 'owner') continue;
+				await fetch(`/api/files/${item.id}`, {
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ parent_id: null })
+				});
+			}
+			toast.success(
+				items.length === 1
+					? `"${items[0].name}" movido para a raiz de Meus Arquivos!`
+					: `${items.length} itens movidos para a raiz de Meus Arquivos!`
+			);
+			dragStore.notifyChanged();
+		} else if (target === 'starred') {
+			for (const item of items) {
+				if (item.permission !== 'owner') continue;
+				await fetch(`/api/files/${item.id}`, {
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ is_starred: true })
+				});
+			}
+			toast.success(
+				items.length === 1
+					? `"${items[0].name}" adicionado aos Favoritos!`
+					: `${items.length} itens adicionados aos Favoritos!`
+			);
+			dragStore.notifyChanged();
+		} else if (target === 'trash') {
+			for (const item of items) {
+				if (item.permission !== 'owner' && item.permission !== 'editor') continue;
+				await fetch(`/api/files/${item.id}`, { method: 'DELETE' });
+			}
+			toast.info(
+				items.length === 1
+					? `"${items[0].name}" movido para a Lixeira.`
+					: `${items.length} itens movidos para a Lixeira.`
+			);
+			dragStore.notifyChanged();
+		}
 	}
 
 	async function logout() {
@@ -105,11 +163,18 @@
 					<a
 						href="/"
 						onclick={() => (mobileOpen = false)}
-						class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition {isNavActive('/', 'drive')
-							? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
-							: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
+						ondragover={(e) => onNavDragOver(e, 'root')}
+						ondragleave={() => {
+							if (sidebarDropTarget === 'root') sidebarDropTarget = null;
+						}}
+						ondrop={(e) => onNavDrop(e, 'root')}
+						class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition {sidebarDropTarget === 'root'
+							? 'bg-accent-500/25 text-white ring-2 ring-accent-400'
+							: isNavActive('/', 'drive')
+								? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
+								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 					>
-						<HardDrive class="h-4 w-4 {isNavActive('/', 'drive') ? 'text-accent-400' : ''}" />
+						<HardDrive class="h-4 w-4 {isNavActive('/', 'drive') || sidebarDropTarget === 'root' ? 'text-accent-400' : ''}" />
 						Meus Arquivos
 					</a>
 					<a
@@ -125,11 +190,18 @@
 					<a
 						href="/?view=starred"
 						onclick={() => (mobileOpen = false)}
-						class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition {isNavActive('/', 'starred')
-							? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
-							: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
+						ondragover={(e) => onNavDragOver(e, 'starred')}
+						ondragleave={() => {
+							if (sidebarDropTarget === 'starred') sidebarDropTarget = null;
+						}}
+						ondrop={(e) => onNavDrop(e, 'starred')}
+						class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition {sidebarDropTarget === 'starred'
+							? 'bg-amber-500/20 text-white ring-2 ring-amber-400'
+							: isNavActive('/', 'starred')
+								? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
+								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 					>
-						<Star class="h-4 w-4 {isNavActive('/', 'starred') ? 'text-amber-400' : ''}" />
+						<Star class="h-4 w-4 {isNavActive('/', 'starred') || sidebarDropTarget === 'starred' ? 'text-amber-400' : ''}" />
 						Favoritos
 					</a>
 					<a
@@ -145,11 +217,18 @@
 					<a
 						href="/?view=trash"
 						onclick={() => (mobileOpen = false)}
-						class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition {isNavActive('/', 'trash')
-							? 'bg-[#19253c] text-white shadow-xs ring-1 ring-rose-500/40'
-							: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
+						ondragover={(e) => onNavDragOver(e, 'trash')}
+						ondragleave={() => {
+							if (sidebarDropTarget === 'trash') sidebarDropTarget = null;
+						}}
+						ondrop={(e) => onNavDrop(e, 'trash')}
+						class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition {sidebarDropTarget === 'trash'
+							? 'bg-rose-500/25 text-white ring-2 ring-rose-400'
+							: isNavActive('/', 'trash')
+								? 'bg-[#19253c] text-white shadow-xs ring-1 ring-rose-500/40'
+								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 					>
-						<Trash2 class="h-4 w-4 {isNavActive('/', 'trash') ? 'text-rose-400' : ''}" />
+						<Trash2 class="h-4 w-4 {isNavActive('/', 'trash') || sidebarDropTarget === 'trash' ? 'text-rose-400' : ''}" />
 						Lixeira
 					</a>
 				</div>

@@ -4,6 +4,7 @@
 	import type { BreadcrumbItem, StorageNode } from '$lib/types';
 	import { quotaStore } from '$lib/stores/quota.svelte';
 	import { transferManager } from '$lib/stores/transfers.svelte';
+	import { dragStore, LIZZART_DRAG_MIME } from '$lib/stores/drag.svelte';
 	import { toast } from '$lib/stores/toast.svelte';
 	import { formatBytes, formatDate, getFileCategory, isPreviewable } from '$lib/utils';
 	import FileIcon from '$lib/components/explorer/FileIcon.svelte';
@@ -80,9 +81,12 @@
 	}
 
 	let fileInputEl = $state<HTMLInputElement | null>(null);
-	// Marquee selection is strictly bounded inside contentAreaEl
 	let contentAreaEl = $state<HTMLDivElement | null>(null);
-	let dragOver = $state(false);
+	let externalDragOver = $state(false);
+
+	// Internal Drag & Drop targets
+	let dropHoverFolderId = $state<string | null>(null);
+	let dropHoverCrumbIdx = $state<number | null>(null);
 
 	// Multi-selection + Bounded Marquee Rectangle
 	let selectedIds = $state<Set<string>>(new Set());
@@ -139,16 +143,16 @@
 			params.set('dir', sortDir);
 
 			const res = await fetch(`/api/files?${params.toString()}`);
-			const data = await res.json();
+			const payload = await res.json();
 			if (!res.ok) {
-				toast.error(data.error || 'Erro ao carregar arquivos.');
+				toast.error(payload.error || 'Erro ao carregar arquivos.');
 				return;
 			}
-			nodes = data.nodes;
-			breadcrumbs = data.breadcrumbs;
-			currentPermission = data.currentPermission || 'owner';
-			if (data.quota) {
-				quotaStore.sync(data.quota.used_bytes, data.quota.quota_bytes);
+			nodes = payload.nodes;
+			breadcrumbs = payload.breadcrumbs;
+			currentPermission = payload.currentPermission || 'owner';
+			if (payload.quota) {
+				quotaStore.sync(payload.quota.used_bytes, payload.quota.quota_bytes);
 			}
 		} catch {
 			toast.error('Erro de conexão ao listar arquivos.');
@@ -163,6 +167,7 @@
 		void debouncedSearch;
 		void sortBy;
 		void sortDir;
+		void dragStore.version;
 		loadNodes();
 	});
 
@@ -229,6 +234,117 @@
 		}
 	}
 
+	// Internal Drag & Drop for files and folders
+	function onNodeDragStart(e: DragEvent, node: StorageNode) {
+		if (node.is_trashed || node.permission !== 'owner') {
+			e.preventDefault();
+			return;
+		}
+		contextMenu = null;
+
+		let itemsToDrag: StorageNode[];
+		if (selectedIds.has(node.id)) {
+			itemsToDrag = selectedNodes.filter((n) => !n.is_trashed && n.permission === 'owner');
+		} else {
+			selectedIds = new Set([node.id]);
+			itemsToDrag = [node];
+		}
+
+		dragStore.start(itemsToDrag);
+		if (e.dataTransfer) {
+			e.dataTransfer.effectAllowed = 'move';
+			e.dataTransfer.setData(LIZZART_DRAG_MIME, JSON.stringify(itemsToDrag.map((i) => i.id)));
+			e.dataTransfer.setData('text/plain', itemsToDrag.map((i) => i.name).join(', '));
+		}
+	}
+
+	function onNodeDragEnd() {
+		dragStore.end();
+		dropHoverFolderId = null;
+		dropHoverCrumbIdx = null;
+	}
+
+	function isInternalDrag(e: DragEvent): boolean {
+		return dragStore.active || Boolean(e.dataTransfer?.types.includes(LIZZART_DRAG_MIME));
+	}
+
+	function onFolderDragOver(e: DragEvent, targetFolder: StorageNode) {
+		if (targetFolder.type !== 'folder' || targetFolder.is_trashed) return;
+		if (!isInternalDrag(e)) return;
+		if (dragStore.draggingIds.has(targetFolder.id)) return; // cannot drop folder into itself
+		e.preventDefault();
+		e.stopPropagation();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		dropHoverFolderId = targetFolder.id;
+	}
+
+	async function onFolderDrop(e: DragEvent, targetFolder: StorageNode) {
+		if (targetFolder.type !== 'folder' || targetFolder.is_trashed) return;
+		if (!isInternalDrag(e)) return;
+		e.preventDefault();
+		e.stopPropagation();
+		dropHoverFolderId = null;
+
+		const items = dragStore.draggingNodes.filter((n) => n.id !== targetFolder.id);
+		dragStore.end();
+		if (items.length === 0) return;
+
+		await moveItemsToParent(items, targetFolder.id, targetFolder.name);
+	}
+
+	function onCrumbDragOver(e: DragEvent, idx: number, crumb: BreadcrumbItem) {
+		if (!isInternalDrag(e)) return;
+		if (view !== 'drive') return;
+		if (crumb.id && dragStore.draggingIds.has(crumb.id)) return;
+		e.preventDefault();
+		e.stopPropagation();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		dropHoverCrumbIdx = idx;
+	}
+
+	async function onCrumbDrop(e: DragEvent, crumb: BreadcrumbItem) {
+		if (!isInternalDrag(e) || view !== 'drive') return;
+		e.preventDefault();
+		e.stopPropagation();
+		dropHoverCrumbIdx = null;
+
+		const items = dragStore.draggingNodes.filter((n) => n.id !== crumb.id);
+		dragStore.end();
+		if (items.length === 0) return;
+
+		await moveItemsToParent(items, crumb.id, crumb.name);
+	}
+
+	async function moveItemsToParent(
+		items: StorageNode[],
+		targetParentId: string | null,
+		targetLabel: string
+	) {
+		let moved = 0;
+		for (const item of items) {
+			if (item.parent_id === targetParentId) continue;
+			const res = await fetch(`/api/files/${item.id}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ parent_id: targetParentId })
+			});
+			if (res.ok) {
+				moved++;
+			} else {
+				const err = await res.json().catch(() => ({}));
+				toast.error(err.error || `Erro ao mover "${item.name}".`);
+			}
+		}
+		if (moved > 0) {
+			toast.success(
+				moved === 1
+					? `"${items[0].name}" movido para "${targetLabel}"!`
+					: `${moved} itens movidos para "${targetLabel}"!`
+			);
+			await loadNodes();
+		}
+	}
+
 	// Marquee strictly confined to contentAreaEl
 	function onContentMouseDown(e: MouseEvent) {
 		if (e.button !== 0 || !contentAreaEl) return;
@@ -266,7 +382,6 @@
 		if (!marquee || !contentAreaEl) return;
 		const bounds = contentAreaEl.getBoundingClientRect();
 
-		// Clamp cursor strictly inside the content area box
 		const curX = Math.max(0, Math.min(bounds.width, e.clientX - bounds.left));
 		const curY = Math.max(0, Math.min(bounds.height, e.clientY - bounds.top));
 		marquee = { ...marquee, curX, curY };
@@ -278,7 +393,6 @@
 
 		if (relRight - relLeft < 4 && relBottom - relTop < 4) return;
 
-		// Convert clamped box back to viewport coords for intersection checks
 		const vpLeft = bounds.left + relLeft;
 		const vpRight = bounds.left + relRight;
 		const vpTop = bounds.top + relTop;
@@ -307,6 +421,7 @@
 		window.removeEventListener('mouseup', onMarqueeUp);
 	}
 
+	// Custom Context Menu — safe action runner (captures target BEFORE closing menu!)
 	function openContextMenu(e: MouseEvent, targetNode: StorageNode | null) {
 		e.preventDefault();
 		e.stopPropagation();
@@ -316,8 +431,8 @@
 			lastClickedId = targetNode.id;
 		}
 
-		const menuWidth = 232;
-		const menuHeight = 350;
+		const menuWidth = 236;
+		const menuHeight = 360;
 		const x = Math.min(e.clientX, window.innerWidth - menuWidth - 10);
 		const y = Math.min(e.clientY, window.innerHeight - menuHeight - 10);
 
@@ -334,8 +449,8 @@
 		if (!selectedIds.has(node.id)) {
 			selectedIds = new Set([node.id]);
 		}
-		const menuWidth = 232;
-		const menuHeight = 350;
+		const menuWidth = 236;
+		const menuHeight = 360;
 		const x = Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 10);
 		const y = Math.min(rect.bottom + 4, window.innerHeight - menuHeight - 10);
 		contextMenu = {
@@ -343,6 +458,14 @@
 			y: Math.max(8, y),
 			targetNode: node
 		};
+	}
+
+	/** Captures snapshot of targetNode & selection BEFORE closing the context menu */
+	function runMenuAction(action: (node: StorageNode | null, multi: StorageNode[]) => void) {
+		const node = contextMenu?.targetNode ?? null;
+		const multi = [...selectedNodes];
+		contextMenu = null;
+		action(node, multi);
 	}
 
 	function handleWindowKeyDown(e: KeyboardEvent) {
@@ -357,8 +480,25 @@
 			selectedIds = new Set(nodes.map((n) => n.id));
 		} else if (e.key === 'Delete' && selectedNodes.length > 0 && !previewNode && !cropNode) {
 			e.preventDefault();
-			if (view === 'trash') bulkDeletePermanent();
-			else bulkTrash();
+			if (view === 'trash') bulkDeletePermanent(selectedNodes);
+			else bulkTrash(selectedNodes);
+		}
+	}
+
+	// External OS File Drop (Upload) — ignores internal node drags
+	function onExternalDragOver(e: DragEvent) {
+		if (isInternalDrag(e)) return;
+		if (!e.dataTransfer?.types.includes('Files')) return;
+		e.preventDefault();
+		if (canWriteHere) externalDragOver = true;
+	}
+
+	function onExternalDrop(e: DragEvent) {
+		if (isInternalDrag(e)) return;
+		e.preventDefault();
+		externalDragOver = false;
+		if (e.dataTransfer?.files?.length) {
+			uploadFiles(e.dataTransfer.files);
 		}
 	}
 
@@ -383,21 +523,13 @@
 		transferManager.enqueueDownload(node.id, node.name, node.size_bytes, node.mime_type);
 	}
 
-	function bulkDownload() {
-		const files = selectedNodes.filter((n) => n.type === 'file');
+	function bulkDownload(items: StorageNode[]) {
+		const files = items.filter((n) => n.type === 'file');
 		if (files.length === 0) {
 			toast.info('Selecione pelo menos um arquivo para baixar.');
 			return;
 		}
 		for (const f of files) downloadNode(f);
-	}
-
-	function onDrop(e: DragEvent) {
-		e.preventDefault();
-		dragOver = false;
-		if (e.dataTransfer?.files?.length) {
-			uploadFiles(e.dataTransfer.files);
-		}
 	}
 
 	async function createFolder(e: SubmitEvent) {
@@ -408,12 +540,12 @@
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ name: newFolderName.trim(), parentId })
 		});
-		const data = await res.json();
+		const payload = await res.json();
 		if (!res.ok) {
-			toast.error(data.error || 'Erro ao criar pasta.');
+			toast.error(payload.error || 'Erro ao criar pasta.');
 			return;
 		}
-		toast.success(`Pasta "${data.node.name}" criada!`);
+		toast.success(`Pasta "${payload.node.name}" criada!`);
 		newFolderName = '';
 		showNewFolderModal = false;
 		await loadNodes();
@@ -441,9 +573,9 @@
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ name: renameValue.trim() })
 		});
-		const data = await res.json();
+		const payload = await res.json();
 		if (!res.ok) {
-			toast.error(data.error || 'Falha ao renomear.');
+			toast.error(payload.error || 'Falha ao renomear.');
 			return;
 		}
 		toast.success('Item renomeado!');
@@ -453,30 +585,28 @@
 
 	async function copyFile(node: StorageNode) {
 		const res = await fetch(`/api/files/${node.id}/copy`, { method: 'POST' });
-		const data = await res.json();
+		const payload = await res.json();
 		if (!res.ok) {
-			toast.error(data.error || 'Falha ao duplicar arquivo.');
+			toast.error(payload.error || 'Falha ao duplicar arquivo.');
 			return;
 		}
-		toast.success(`Cópia criada: "${data.name}"`);
+		toast.success(`Cópia criada: "${payload.name}"`);
 		await loadNodes();
 	}
 
 	async function trashNode(node: StorageNode) {
 		const res = await fetch(`/api/files/${node.id}`, { method: 'DELETE' });
 		if (!res.ok) {
-			const data = await res.json().catch(() => ({}));
-			toast.error(data.error || 'Não foi possível mover para a lixeira.');
+			const payload = await res.json().catch(() => ({}));
+			toast.error(payload.error || 'Não foi possível mover para a lixeira.');
 			return;
 		}
 		toast.info(`"${node.name}" movido para a lixeira.`);
 		await loadNodes();
 	}
 
-	async function bulkTrash() {
-		const deletable = selectedNodes.filter(
-			(n) => n.permission === 'owner' || n.permission === 'editor'
-		);
+	async function bulkTrash(items: StorageNode[]) {
+		const deletable = items.filter((n) => n.permission === 'owner' || n.permission === 'editor');
 		if (deletable.length === 0) return;
 		for (const n of deletable) {
 			await fetch(`/api/files/${n.id}`, { method: 'DELETE' });
@@ -497,15 +627,15 @@
 		}
 	}
 
-	async function bulkRestore() {
-		for (const n of selectedNodes) {
+	async function bulkRestore(items: StorageNode[]) {
+		for (const n of items) {
 			await fetch(`/api/files/${n.id}`, {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ restore: true })
 			});
 		}
-		toast.success(`${selectedNodes.length} item(ns) restaurado(s)!`);
+		toast.success(`${items.length} item(ns) restaurado(s)!`);
 		await loadNodes();
 	}
 
@@ -520,18 +650,16 @@
 		}
 	}
 
-	async function bulkDeletePermanent() {
+	async function bulkDeletePermanent(items: StorageNode[]) {
 		if (
-			!confirm(
-				`Excluir permanentemente ${selectedNodes.length} item(ns)? Esta ação não pode ser desfeita.`
-			)
+			!confirm(`Excluir permanentemente ${items.length} item(ns)? Esta ação não pode ser desfeita.`)
 		) {
 			return;
 		}
-		for (const n of selectedNodes) {
+		for (const n of items) {
 			await fetch(`/api/files/${n.id}?permanent=true`, { method: 'DELETE' });
 		}
-		toast.success(`${selectedNodes.length} item(ns) excluído(s) do disco.`);
+		toast.success(`${items.length} item(ns) excluído(s) do disco.`);
 		await loadNodes();
 	}
 
@@ -560,7 +688,6 @@
 <svelte:window
 	onkeydown={handleWindowKeyDown}
 	onclick={() => (contextMenu = null)}
-	onscroll={() => (contextMenu = null)}
 />
 
 <svelte:head>
@@ -569,19 +696,16 @@
 
 <div
 	class="relative flex min-h-full flex-1 flex-col p-3.5 sm:p-6 lg:p-8"
-	ondragover={(e) => {
-		e.preventDefault();
-		if (canWriteHere) dragOver = true;
-	}}
+	ondragover={onExternalDragOver}
 	ondragleave={(e) => {
-		if (e.currentTarget === e.target) dragOver = false;
+		if (e.currentTarget === e.target) externalDragOver = false;
 	}}
-	ondrop={onDrop}
+	ondrop={onExternalDrop}
 	role="region"
 	aria-label="Explorador de arquivos"
 >
-	<!-- Drag overlay -->
-	{#if dragOver}
+	<!-- External Upload Drag Overlay -->
+	{#if externalDragOver}
 		<div class="pointer-events-none fixed inset-0 z-40 flex flex-col items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
 			<div class="flex flex-col items-center rounded-3xl border-2 border-dashed border-accent-400 bg-[#131c2e]/95 px-8 py-10 text-center shadow-2xl sm:px-14 sm:py-12">
 				<CloudUpload class="mb-4 h-14 w-14 text-accent-400 sm:h-16 sm:w-16" />
@@ -603,7 +727,7 @@
 		}}
 	/>
 
-	<!-- Top Header & Actions (outside selection area) -->
+	<!-- Top Header & Actions -->
 	<div class="mb-4 flex flex-col gap-3 sm:mb-5 md:flex-row md:items-center md:justify-between">
 		<div class="relative w-full md:max-w-md">
 			<Search class="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-500" />
@@ -684,7 +808,7 @@
 		</div>
 	</div>
 
-	<!-- Breadcrumbs & Sort Bar (outside selection area) -->
+	<!-- Breadcrumbs (also drop targets for moving items up!) & Sort Bar -->
 	<div class="mb-4 flex flex-wrap items-center justify-between gap-2.5 border-b border-[#1a253a] pb-3">
 		<div class="flex flex-wrap items-center gap-1 text-sm">
 			{#each breadcrumbs as crumb, idx (crumb.id ?? 'root-' + idx)}
@@ -694,9 +818,16 @@
 				<button
 					type="button"
 					onclick={() => openFolder(crumb.id)}
-					class="rounded-lg px-2 py-1 font-medium transition {idx === breadcrumbs.length - 1
-						? 'text-white'
-						: 'text-slate-400 hover:bg-[#131c2e] hover:text-slate-200'}"
+					ondragover={(e) => onCrumbDragOver(e, idx, crumb)}
+					ondragleave={() => {
+						if (dropHoverCrumbIdx === idx) dropHoverCrumbIdx = null;
+					}}
+					ondrop={(e) => onCrumbDrop(e, crumb)}
+					class="rounded-lg px-2 py-1 font-medium transition {dropHoverCrumbIdx === idx
+						? 'bg-accent-500/25 text-white ring-2 ring-accent-400'
+						: idx === breadcrumbs.length - 1
+							? 'text-white'
+							: 'text-slate-400 hover:bg-[#131c2e] hover:text-slate-200'}"
 				>
 					{crumb.name}
 				</button>
@@ -735,7 +866,7 @@
 		</div>
 	</div>
 
-	<!-- BOUNDED CONTENT AREA: Marquee selection & context menu live strictly here -->
+	<!-- BOUNDED CONTENT AREA -->
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<div
 		bind:this={contentAreaEl}
@@ -815,13 +946,23 @@
 				{/if}
 			</div>
 		{:else if displayMode === 'grid'}
-			<!-- RESPONSIVE GRID VIEW -->
+			<!-- RESPONSIVE GRID VIEW WITH DRAG & DROP -->
 			<div class="grid grid-cols-2 gap-3 pb-4 sm:gap-4 md:grid-cols-3 xl:grid-cols-4">
 				{#each nodes as node (node.id)}
 					{@const isSelected = selectedIds.has(node.id)}
+					{@const isDragging = dragStore.draggingIds.has(node.id)}
+					{@const isDropTarget = dropHoverFolderId === node.id}
 					{@const isImage = node.type === 'file' && getFileCategory('file', node.mime_type, node.name) === 'image' && !node.is_trashed}
 					<div
 						data-node-id={node.id}
+						draggable={!node.is_trashed && node.permission === 'owner'}
+						ondragstart={(e) => onNodeDragStart(e, node)}
+						ondragend={onNodeDragEnd}
+						ondragover={(e) => onFolderDragOver(e, node)}
+						ondragleave={() => {
+							if (dropHoverFolderId === node.id) dropHoverFolderId = null;
+						}}
+						ondrop={(e) => onFolderDrop(e, node)}
 						onclick={(e) => handleNodeClick(node, e)}
 						ondblclick={() => handleNodeDoubleClick(node)}
 						oncontextmenu={(e) => openContextMenu(e, node)}
@@ -830,9 +971,13 @@
 						onkeydown={(e) => {
 							if (e.key === 'Enter') handleNodeDoubleClick(node);
 						}}
-						class="group flex flex-col overflow-hidden rounded-2xl border transition {isSelected
-							? 'border-accent-400 bg-[#18273e] ring-2 ring-accent-500/35 shadow-xl'
-							: 'border-[#1f2d45] bg-[#131c2e] hover:border-accent-500/40 hover:bg-[#172238] hover:shadow-xl hover:shadow-black/30'}"
+						class="group flex flex-col overflow-hidden rounded-2xl border transition {isDragging
+							? 'opacity-45'
+							: ''} {isDropTarget
+							? 'scale-[1.02] border-accent-400 bg-accent-500/20 ring-2 ring-accent-400 shadow-2xl'
+							: isSelected
+								? 'border-accent-400 bg-[#18273e] ring-2 ring-accent-500/35 shadow-xl'
+								: 'border-[#1f2d45] bg-[#131c2e] hover:border-accent-500/40 hover:bg-[#172238] hover:shadow-xl hover:shadow-black/30'}"
 					>
 						<div class="relative flex h-24 items-center justify-center overflow-hidden bg-[#0e1525] sm:h-32">
 							{#if isImage}
@@ -845,6 +990,12 @@
 								/>
 							{:else}
 								<FileIcon type={node.type} mime={node.mime_type} name={node.name} size="lg" />
+							{/if}
+
+							{#if isDropTarget}
+								<div class="absolute inset-0 flex items-center justify-center bg-accent-600/25 text-xs font-semibold text-white backdrop-blur-[1px]">
+									Soltar aqui
+								</div>
 							{/if}
 
 							{#if isSelected}
@@ -904,7 +1055,6 @@
 										<p class="mt-0.5 truncate font-mono text-[10px] text-slate-500">@{node.owner_username}</p>
 									{/if}
 								</div>
-								<!-- Mobile-friendly context menu trigger -->
 								<button
 									type="button"
 									onclick={(e) => openMenuFromButton(e, node)}
@@ -915,7 +1065,6 @@
 								</button>
 							</div>
 
-							<!-- Quick action bar (hidden on very small screens since ⋮ menu handles everything cleanly) -->
 							<div class="mt-2.5 hidden flex-wrap items-center gap-1 border-t border-[#1f2d45] pt-2 sm:flex">
 								{#if node.is_trashed}
 									<button
@@ -959,7 +1108,7 @@
 				{/each}
 			</div>
 		{:else}
-			<!-- RESPONSIVE LIST VIEW -->
+			<!-- RESPONSIVE LIST VIEW WITH DRAG & DROP -->
 			<div class="overflow-x-auto rounded-2xl border border-[#1f2d45] bg-[#131c2e]">
 				<table class="w-full text-left text-sm">
 					<thead class="border-b border-[#1f2d45] bg-[#0e1525] text-xs uppercase tracking-wider text-slate-400">
@@ -973,12 +1122,26 @@
 					<tbody class="divide-y divide-[#1a253a]">
 						{#each nodes as node (node.id)}
 							{@const isSelected = selectedIds.has(node.id)}
+							{@const isDragging = dragStore.draggingIds.has(node.id)}
+							{@const isDropTarget = dropHoverFolderId === node.id}
 							<tr
 								data-node-id={node.id}
+								draggable={!node.is_trashed && node.permission === 'owner'}
+								ondragstart={(e) => onNodeDragStart(e, node)}
+								ondragend={onNodeDragEnd}
+								ondragover={(e) => onFolderDragOver(e, node)}
+								ondragleave={() => {
+									if (dropHoverFolderId === node.id) dropHoverFolderId = null;
+								}}
+								ondrop={(e) => onFolderDrop(e, node)}
 								onclick={(e) => handleNodeClick(node, e)}
 								ondblclick={() => handleNodeDoubleClick(node)}
 								oncontextmenu={(e) => openContextMenu(e, node)}
-								class="transition {isSelected ? 'bg-accent-500/15' : 'hover:bg-[#19243a]'}"
+								class="transition {isDragging ? 'opacity-45' : ''} {isDropTarget
+									? 'bg-accent-500/25 ring-1 ring-inset ring-accent-400'
+									: isSelected
+										? 'bg-accent-500/15'
+										: 'hover:bg-[#19243a]'}"
 							>
 								<td class="px-3.5 py-3 sm:px-4">
 									<div class="flex items-center gap-2.5">
@@ -1022,10 +1185,10 @@
 	</div>
 </div>
 
-<!-- CUSTOM CONTEXT MENU -->
+<!-- CUSTOM CONTEXT MENU (100% Fixed: snapshots targetNode before closing!) -->
 {#if contextMenu}
 	{@const tNode = contextMenu.targetNode}
-	{@const isMulti = selectedNodes.length > 1 && tNode && selectedIds.has(tNode.id)}
+	{@const isMulti = selectedNodes.length > 1 && (!tNode || selectedIds.has(tNode.id))}
 	<div
 		onclick={(e) => e.stopPropagation()}
 		onkeydown={(e) => {
@@ -1034,7 +1197,7 @@
 		oncontextmenu={(e) => e.preventDefault()}
 		role="menu"
 		tabindex="-1"
-		class="fixed z-[80] w-56 overflow-hidden rounded-xl border border-[#2a3b58] bg-[#111929]/95 py-1.5 text-xs shadow-2xl backdrop-blur-xl"
+		class="fixed z-[80] w-58 overflow-hidden rounded-xl border border-[#2a3b58] bg-[#111929]/95 py-1.5 text-xs shadow-2xl backdrop-blur-xl"
 		style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
 	>
 		{#if isMulti}
@@ -1042,23 +1205,23 @@
 				{selectedNodes.length} itens selecionados
 			</div>
 			{#if view === 'trash'}
-				<button type="button" onclick={() => { contextMenu = null; bulkRestore(); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+				<button type="button" onclick={() => runMenuAction((_, m) => bulkRestore(m))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 					<RotateCcw class="h-3.5 w-3.5 text-accent-400" /> Restaurar selecionados
 				</button>
-				<button type="button" onclick={() => { contextMenu = null; bulkDeletePermanent(); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-rose-300 hover:bg-rose-500/20">
+				<button type="button" onclick={() => runMenuAction((_, m) => bulkDeletePermanent(m))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-rose-300 hover:bg-rose-500/20">
 					<Trash2 class="h-3.5 w-3.5" /> Excluir permanentemente
 				</button>
 			{:else}
-				<button type="button" onclick={() => { contextMenu = null; bulkDownload(); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+				<button type="button" onclick={() => runMenuAction((_, m) => bulkDownload(m))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 					<Download class="h-3.5 w-3.5 text-accent-400" /> Baixar selecionados
 				</button>
 				{#if selectedNodes.every((n) => n.permission === 'owner')}
-					<button type="button" onclick={() => { contextMenu = null; moveNodes = [...selectedNodes]; }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+					<button type="button" onclick={() => runMenuAction((_, m) => (moveNodes = m))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 						<FolderInput class="h-3.5 w-3.5 text-slate-400" /> Mover selecionados
 					</button>
 				{/if}
 				<div class="my-1 border-t border-[#1f2d45]"></div>
-				<button type="button" onclick={() => { contextMenu = null; bulkTrash(); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-rose-300 hover:bg-rose-500/20">
+				<button type="button" onclick={() => runMenuAction((_, m) => bulkTrash(m))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-rose-300 hover:bg-rose-500/20">
 					<Trash2 class="h-3.5 w-3.5" /> Mover para lixeira
 				</button>
 			{/if}
@@ -1067,81 +1230,98 @@
 				{tNode.name}
 			</div>
 			{#if tNode.is_trashed}
-				<button type="button" onclick={() => { contextMenu = null; restoreNode(tNode); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+				<button type="button" onclick={() => runMenuAction((n) => n && restoreNode(n))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 					<RotateCcw class="h-3.5 w-3.5 text-accent-400" /> Restaurar
 				</button>
-				<button type="button" onclick={() => { contextMenu = null; deletePermanent(tNode); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-rose-300 hover:bg-rose-500/20">
+				<button type="button" onclick={() => runMenuAction((n) => n && deletePermanent(n))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-rose-300 hover:bg-rose-500/20">
 					<Trash2 class="h-3.5 w-3.5" /> Excluir permanentemente
 				</button>
 			{:else}
 				{#if tNode.type === 'folder'}
-					<button type="button" onclick={() => { contextMenu = null; openFolder(tNode.id); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+					<button type="button" onclick={() => runMenuAction((n) => n && openFolder(n.id))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 						<FolderOpen class="h-3.5 w-3.5 text-accent-400" /> Abrir pasta
 					</button>
 				{:else}
-					<button type="button" onclick={() => { contextMenu = null; previewNode = tNode; }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+					<button type="button" onclick={() => runMenuAction((n) => n && (previewNode = n))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 						<Eye class="h-3.5 w-3.5 text-accent-400" /> Visualizar / Reproduzir
 					</button>
 					{#if canCropNode(tNode)}
-						<button type="button" onclick={() => { contextMenu = null; cropNode = tNode; }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+						<button type="button" onclick={() => runMenuAction((n) => n && (cropNode = n))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 							<Crop class="h-3.5 w-3.5 text-accent-400" /> Recortar bordas
 						</button>
 					{/if}
-					<button type="button" onclick={() => { contextMenu = null; downloadNode(tNode); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+					<button type="button" onclick={() => runMenuAction((n) => n && downloadNode(n))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 						<Download class="h-3.5 w-3.5 text-slate-400" /> Baixar (retomável)
 					</button>
 				{/if}
 
 				{#if tNode.permission === 'owner'}
-					<button type="button" onclick={() => { contextMenu = null; shareNode = tNode; }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+					<button type="button" onclick={() => runMenuAction((n) => n && (shareNode = n))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 						<Share2 class="h-3.5 w-3.5 text-accent-400" /> Compartilhar
 					</button>
-					<button type="button" onclick={() => { contextMenu = null; toggleStar(tNode); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+					<button type="button" onclick={() => runMenuAction((n) => n && toggleStar(n))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 						<Star class="h-3.5 w-3.5 {tNode.is_starred ? 'fill-amber-400 text-amber-400' : 'text-slate-400'}" />
 						{tNode.is_starred ? 'Remover dos favoritos' : 'Favoritar'}
 					</button>
-					<button type="button" onclick={() => { contextMenu = null; moveNodes = [tNode]; }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+					<button type="button" onclick={() => runMenuAction((n) => n && (moveNodes = [n]))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 						<FolderInput class="h-3.5 w-3.5 text-slate-400" /> Mover para...
 					</button>
 				{/if}
 
 				{#if tNode.type === 'file'}
-					<button type="button" onclick={() => { contextMenu = null; copyFile(tNode); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+					<button type="button" onclick={() => runMenuAction((n) => n && copyFile(n))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 						<Copy class="h-3.5 w-3.5 text-slate-400" /> Duplicar
 					</button>
 				{/if}
 
 				{#if tNode.permission === 'owner' || tNode.permission === 'editor'}
-					<button type="button" onclick={() => { contextMenu = null; renameNode = tNode; renameValue = tNode.name; }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+					<button
+						type="button"
+						onclick={() =>
+							runMenuAction((n) => {
+								if (!n) return;
+								renameNode = n;
+								renameValue = n.name;
+							})}
+						class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white"
+					>
 						<Pencil class="h-3.5 w-3.5 text-slate-400" /> Renomear
 					</button>
 					<div class="my-1 border-t border-[#1f2d45]"></div>
-					<button type="button" onclick={() => { contextMenu = null; trashNode(tNode); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-rose-300 hover:bg-rose-500/20">
+					<button type="button" onclick={() => runMenuAction((n) => n && trashNode(n))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-rose-300 hover:bg-rose-500/20">
 						<Trash2 class="h-3.5 w-3.5" /> Mover para lixeira
 					</button>
 				{/if}
 			{/if}
 		{:else}
 			{#if canWriteHere}
-				<button type="button" onclick={() => { contextMenu = null; fileInputEl?.click(); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+				<button type="button" onclick={() => runMenuAction(() => fileInputEl?.click())} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 					<Upload class="h-3.5 w-3.5 text-accent-400" /> Fazer upload de arquivos
 				</button>
-				<button type="button" onclick={() => { contextMenu = null; newFolderName = ''; showNewFolderModal = true; }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+				<button
+					type="button"
+					onclick={() =>
+						runMenuAction(() => {
+							newFolderName = '';
+							showNewFolderModal = true;
+						})}
+					class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white"
+				>
 					<FolderPlus class="h-3.5 w-3.5 text-accent-400" /> Nova pasta
 				</button>
 				<div class="my-1 border-t border-[#1f2d45]"></div>
 			{/if}
-			<button type="button" onclick={() => { contextMenu = null; selectedIds = new Set(nodes.map((n) => n.id)); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+			<button type="button" onclick={() => runMenuAction(() => (selectedIds = new Set(nodes.map((n) => n.id))))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 				<CheckSquare class="h-3.5 w-3.5 text-slate-400" /> Selecionar tudo
 			</button>
-			<button type="button" onclick={() => { contextMenu = null; setDisplayMode(displayMode === 'grid' ? 'list' : 'grid'); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+			<button type="button" onclick={() => runMenuAction(() => setDisplayMode(displayMode === 'grid' ? 'list' : 'grid'))} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 				{#if displayMode === 'grid'}
 					<List class="h-3.5 w-3.5 text-slate-400" /> Mudar para Lista
 				{:else}
 					<LayoutGrid class="h-3.5 w-3.5 text-slate-400" /> Mudar para Grade
 				{/if}
 			</button>
-			<button type="button" onclick={() => { contextMenu = null; loadNodes(); }} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
+			<button type="button" onclick={() => runMenuAction(() => loadNodes())} class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-slate-200 hover:bg-accent-500/20 hover:text-white">
 				<RefreshCw class="h-3.5 w-3.5 text-slate-400" /> Atualizar pasta
 			</button>
 		{/if}
