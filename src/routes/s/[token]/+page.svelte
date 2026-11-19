@@ -84,7 +84,7 @@
 
 <div class="flex min-h-screen flex-col items-center justify-center bg-[#0b101b] px-4 py-10">
 	<a href="/" class="mb-6 flex items-center gap-2.5 text-slate-200 hover:text-white">
-		<div class="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600">
+		<div class="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-600">
 			<HardDrive class="h-5 w-5 text-white" />
 		</div>
 		<span class="text-lg font-bold tracking-tight">Lizzart Explorer</span>
@@ -116,7 +116,7 @@
 				{#if unlocked}
 					<a
 						href={downloadUrl}
-						class="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-500"
+						class="inline-flex items-center gap-2 rounded-xl bg-accent-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-accent-600/20 transition hover:bg-accent-500"
 					>
 						<Download class="h-4 w-4" />
 						Baixar Arquivo

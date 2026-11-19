@@ -28,7 +28,7 @@
 </script>
 
 {#if category === 'folder'}
-	<Folder class="{sizeClass} fill-indigo-500/20 text-indigo-400" />
+	<Folder class="{sizeClass} fill-accent-500/20 text-accent-400" />
 {:else if category === 'image'}
 	<Image class="{sizeClass} text-emerald-400" />
 {:else if category === 'video'}

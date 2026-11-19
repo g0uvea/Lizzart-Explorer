@@ -301,7 +301,7 @@
 				/>
 				<button
 					type="submit"
-					class="inline-flex items-center gap-1.5 bg-indigo-600 px-5 py-3 text-xs font-semibold text-white hover:bg-indigo-500"
+					class="inline-flex items-center gap-1.5 bg-accent-600 px-5 py-3 text-xs font-semibold text-white hover:bg-accent-500"
 				>
 					<Send class="h-3.5 w-3.5" /> Enviar
 				</button>

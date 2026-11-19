@@ -109,7 +109,7 @@
 		<button
 			type="button"
 			onclick={() => (showCreateModal = true)}
-			class="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-500"
+			class="inline-flex items-center gap-2 rounded-xl bg-accent-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-accent-600/20 transition hover:bg-accent-500"
 		>
 			<Plus class="h-4 w-4" />
 			Nova Instância
@@ -196,7 +196,7 @@
 							<button
 								type="button"
 								onclick={() => triggerShellStart(srv)}
-								class="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500"
+								class="inline-flex items-center gap-1.5 rounded-xl bg-accent-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-accent-500"
 							>
 								<Power class="h-3.5 w-3.5" />
 								Iniciar
