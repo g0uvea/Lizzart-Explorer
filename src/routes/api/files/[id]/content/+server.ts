@@ -4,6 +4,28 @@ import { getEffectivePermission } from '$lib/server/permissions';
 import { createFileReadStream, getFileStat } from '$lib/server/storage';
 import { logAudit } from '$lib/server/auth';
 
+export const HEAD: RequestHandler = async ({ locals, params }) => {
+	if (!locals.user) return new Response(null, { status: 401 });
+	const { node, permission } = await getEffectivePermission(locals.user, params.id);
+	if (!node || !permission || node.type !== 'file' || !node.disk_path) {
+		return new Response(null, { status: 404 });
+	}
+	try {
+		const stat = await getFileStat(node.disk_path);
+		return new Response(null, {
+			status: 200,
+			headers: {
+				'Content-Type': node.mime_type || 'application/octet-stream',
+				'Content-Length': String(stat.size),
+				'Accept-Ranges': 'bytes',
+				...(node.sha256 ? { ETag: `"${node.sha256}"` } : {})
+			}
+		});
+	} catch {
+		return new Response(null, { status: 404 });
+	}
+};
+
 export const GET: RequestHandler = async ({ locals, params, url, request, getClientAddress }) => {
 	if (!locals.user) {
 		return new Response('Não autenticado', { status: 401 });
@@ -29,7 +51,9 @@ export const GET: RequestHandler = async ({ locals, params, url, request, getCli
 		? `attachment; filename*=UTF-8''${encodedName}`
 		: `inline; filename*=UTF-8''${encodedName}`;
 
-	if (download) {
+	const rangeHeader = request.headers.get('range');
+
+	if (download && (!rangeHeader || rangeHeader.startsWith('bytes=0-'))) {
 		await logAudit({
 			userId: locals.user.id,
 			action: 'file.download',
@@ -40,7 +64,14 @@ export const GET: RequestHandler = async ({ locals, params, url, request, getCli
 		});
 	}
 
-	const rangeHeader = request.headers.get('range');
+	const commonHeaders: Record<string, string> = {
+		'Content-Type': mime,
+		'Accept-Ranges': 'bytes',
+		'Content-Disposition': disposition,
+		'X-File-Size': String(fileSize),
+		...(node.sha256 ? { ETag: `"${node.sha256}"` } : {})
+	};
+
 	if (rangeHeader && fileSize > 0) {
 		const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
 		if (match) {
@@ -53,11 +84,10 @@ export const GET: RequestHandler = async ({ locals, params, url, request, getCli
 				return new Response(webStream, {
 					status: 206,
 					headers: {
-						'Content-Type': mime,
+						...commonHeaders,
 						'Content-Length': String(chunkSize),
 						'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-						'Accept-Ranges': 'bytes',
-						'Content-Disposition': disposition
+						'Cache-Control': 'no-transform'
 					}
 				});
 			}
@@ -69,11 +99,9 @@ export const GET: RequestHandler = async ({ locals, params, url, request, getCli
 	return new Response(webStream, {
 		status: 200,
 		headers: {
-			'Content-Type': mime,
+			...commonHeaders,
 			'Content-Length': String(fileSize),
-			'Accept-Ranges': 'bytes',
-			'Content-Disposition': disposition,
-			'Cache-Control': 'private, max-age=60'
+			'Cache-Control': 'private, no-transform, max-age=60'
 		}
 	});
 };

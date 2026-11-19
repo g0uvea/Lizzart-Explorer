@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getPool } from '$lib/server/db';
-import { logAudit } from '$lib/server/auth';
+import { logAudit, MIN_USER_QUOTA_GB } from '$lib/server/auth';
 
 export const PATCH: RequestHandler = async ({ locals, request, getClientAddress }) => {
 	if (!locals.user || locals.user.role !== 'admin') {
@@ -14,11 +14,15 @@ export const PATCH: RequestHandler = async ({ locals, request, getClientAddress 
 	const db = getPool();
 	const pairs: [string, string][] = [];
 
-	if (typeof body.allow_registration === 'boolean') {
-		pairs.push(['allow_registration', body.allow_registration ? 'true' : 'false']);
-	}
-	if (body.default_quota_gb !== undefined && Number(body.default_quota_gb) > 0) {
-		pairs.push(['default_quota_gb', String(Math.round(Number(body.default_quota_gb)))]);
+	if (body.default_quota_gb !== undefined) {
+		const val = Math.round(Number(body.default_quota_gb));
+		if (Number.isNaN(val) || val < MIN_USER_QUOTA_GB) {
+			return json(
+				{ error: `A cota padrão mínima é de ${MIN_USER_QUOTA_GB} GB.` },
+				{ status: 400 }
+			);
+		}
+		pairs.push(['default_quota_gb', String(val)]);
 	}
 	if (body.max_upload_mb !== undefined && Number(body.max_upload_mb) > 0) {
 		pairs.push(['max_upload_mb', String(Math.round(Number(body.max_upload_mb)))]);
@@ -36,7 +40,7 @@ export const PATCH: RequestHandler = async ({ locals, request, getClientAddress 
 		userId: locals.user.id,
 		action: 'admin.settings_update',
 		targetType: 'system',
-		details: `Configurações atualizadas`,
+		details: 'Configurações do sistema atualizadas',
 		ipAddress: getClientAddress()
 	});
 

@@ -7,7 +7,8 @@ import { verifyPassword } from '$lib/server/crypto';
 export const GET: RequestHandler = async ({ params }) => {
 	const db = getPool();
 	const [rows] = await db.query<RowDataPacket[]>(
-		`SELECT sl.*, n.name, n.mime_type, n.size_bytes, n.is_trashed, n.created_at AS file_created_at, u.name AS owner_name
+		`SELECT sl.*, n.name, n.mime_type, n.size_bytes, n.is_trashed, n.created_at AS file_created_at,
+		        CONCAT(u.first_name, ' ', u.last_name) AS owner_name
 		 FROM share_links sl
 		 INNER JOIN storage_nodes n ON n.id = sl.node_id
 		 INNER JOIN users u ON u.id = n.owner_id

@@ -4,9 +4,14 @@ import type { RowDataPacket } from 'mysql2/promise';
 import crypto from 'node:crypto';
 import { getPool } from '$lib/server/db';
 import { hashPassword } from '$lib/server/crypto';
-import { logAudit } from '$lib/server/auth';
+import {
+	isValidUsername,
+	logAudit,
+	MIN_USER_QUOTA_GB,
+	normalizeUsername
+} from '$lib/server/auth';
 
-const COLORS = ['#6366f1', '#10b981', '#0ea5e9', '#f59e0b', '#ec4899', '#8b5cf6'];
+const COLORS = ['#10b981', '#0ea5e9', '#6366f1', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6'];
 
 export const POST: RequestHandler = async ({ locals, request, getClientAddress }) => {
 	if (!locals.user || locals.user.role !== 'admin') {
@@ -14,21 +19,42 @@ export const POST: RequestHandler = async ({ locals, request, getClientAddress }
 	}
 
 	const body = await request.json().catch(() => null);
-	const name = String(body?.name || '').trim();
-	const email = String(body?.email || '').trim().toLowerCase();
+	const username = normalizeUsername(String(body?.username || ''));
+	const firstName = String(body?.first_name || '').trim();
+	const lastName = String(body?.last_name || '').trim();
 	const password = String(body?.password || '');
 	const role = body?.role === 'admin' ? 'admin' : 'user';
-	const quotaGb = Number(body?.quota_gb ?? 10);
-	const quotaBytes = quotaGb < 0 ? -1 : Math.round(quotaGb * 1024 * 1024 * 1024);
+	const unlimited = Boolean(body?.unlimited);
+	const rawQuotaGb = Number(body?.quota_gb ?? MIN_USER_QUOTA_GB);
 
-	if (name.length < 2 || !email.includes('@') || password.length < 6) {
-		return json({ error: 'Preencha nome, e-mail válido e senha (mín. 6 caracteres).' }, { status: 400 });
+	if (!isValidUsername(username)) {
+		return json(
+			{ error: 'Usuário inválido (use 3–32 caracteres: a-z, 0-9, ponto, hífen ou _).' },
+			{ status: 400 }
+		);
+	}
+	if (firstName.length < 2 || lastName.length < 2) {
+		return json({ error: 'Informe Nome e Sobrenome (mín. 2 caracteres cada).' }, { status: 400 });
+	}
+	if (password.length < 6) {
+		return json({ error: 'A senha deve ter pelo menos 6 caracteres.' }, { status: 400 });
+	}
+	if (!unlimited && (Number.isNaN(rawQuotaGb) || rawQuotaGb < MIN_USER_QUOTA_GB)) {
+		return json(
+			{ error: `A cota mínima para novos usuários é de ${MIN_USER_QUOTA_GB} GB.` },
+			{ status: 400 }
+		);
 	}
 
+	const quotaBytes = unlimited ? -1 : Math.round(rawQuotaGb * 1024 * 1024 * 1024);
+
 	const db = getPool();
-	const [existing] = await db.query<RowDataPacket[]>('SELECT id FROM users WHERE email = ?', [email]);
+	const [existing] = await db.query<RowDataPacket[]>(
+		'SELECT id FROM users WHERE username = ?',
+		[username]
+	);
 	if (existing.length > 0) {
-		return json({ error: 'E-mail já cadastrado.' }, { status: 409 });
+		return json({ error: `O usuário @${username} já está em uso.` }, { status: 409 });
 	}
 
 	const id = crypto.randomUUID();
@@ -36,9 +62,9 @@ export const POST: RequestHandler = async ({ locals, request, getClientAddress }
 	const color = COLORS[Math.floor(Math.random() * COLORS.length)];
 
 	await db.query(
-		`INSERT INTO users (id, name, email, password_hash, role, quota_bytes, used_bytes, is_active, avatar_color)
-		 VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?)`,
-		[id, name, email, hash, role, quotaBytes, color]
+		`INSERT INTO users (id, username, first_name, last_name, password_hash, role, quota_bytes, used_bytes, is_active, avatar_color, accent_color, layout_density)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1, ?, '#10b981', 'normal')`,
+		[id, username, firstName, lastName, hash, role, quotaBytes, color]
 	);
 
 	await logAudit({
@@ -46,9 +72,9 @@ export const POST: RequestHandler = async ({ locals, request, getClientAddress }
 		action: 'admin.user_create',
 		targetType: 'user',
 		targetId: id,
-		details: `Usuário criado: ${email} (${role})`,
+		details: `Usuário criado: @${username} (${role}, cota: ${unlimited ? 'Ilimitada' : `${rawQuotaGb} GB`})`,
 		ipAddress: getClientAddress()
 	});
 
-	return json({ id }, { status: 201 });
+	return json({ id, username }, { status: 201 });
 };

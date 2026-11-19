@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { getPool } from '$lib/server/db';
 import { getNodeById } from '$lib/server/permissions';
 import { generateToken, hashPassword } from '$lib/server/crypto';
-import { logAudit } from '$lib/server/auth';
+import { logAudit, normalizeUsername } from '$lib/server/auth';
 
 export const GET: RequestHandler = async ({ locals, params }) => {
 	if (!locals.user) return json({ error: 'Não autenticado.' }, { status: 401 });
@@ -18,7 +18,7 @@ export const GET: RequestHandler = async ({ locals, params }) => {
 	const db = getPool();
 	const [permRows] = await db.query<RowDataPacket[]>(
 		`SELECT np.id, np.node_id, np.user_id, np.permission, np.created_at,
-		        u.name AS user_name, u.email AS user_email, u.avatar_color
+		        u.username, CONCAT(u.first_name, ' ', u.last_name) AS full_name, u.avatar_color, u.avatar_path
 		 FROM node_permissions np
 		 INNER JOIN users u ON u.id = np.user_id
 		 WHERE np.node_id = ?
@@ -40,9 +40,12 @@ export const GET: RequestHandler = async ({ locals, params }) => {
 			id: String(r.id),
 			node_id: String(r.node_id),
 			user_id: String(r.user_id),
-			user_name: String(r.user_name),
-			user_email: String(r.user_email),
-			avatar_color: String(r.avatar_color || '#6366f1'),
+			username: String(r.username),
+			full_name: String(r.full_name || r.username),
+			avatar_color: String(r.avatar_color || '#10b981'),
+			avatar_url: r.avatar_path
+				? `/api/auth/avatar/${r.user_id}?v=${encodeURIComponent(String(r.avatar_path))}`
+				: null,
 			permission: r.permission === 'editor' ? 'editor' : 'viewer',
 			created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at)
 		})),
@@ -79,15 +82,16 @@ export const POST: RequestHandler = async ({ locals, params, request, getClientA
 	const ip = getClientAddress();
 
 	if (body.mode === 'user') {
-		const email = String(body.email || '').trim().toLowerCase();
+		const rawUser = String(body.username || '').replace(/^@/, '');
+		const username = normalizeUsername(rawUser);
 		const permission = body.permission === 'editor' ? 'editor' : 'viewer';
 
 		const [uRows] = await db.query<RowDataPacket[]>(
-			'SELECT id, name, email, avatar_color FROM users WHERE email = ? AND is_active = 1 LIMIT 1',
-			[email]
+			'SELECT id, username FROM users WHERE username = ? AND is_active = 1 LIMIT 1',
+			[username]
 		);
 		if (uRows.length === 0) {
-			return json({ error: 'Usuário não encontrado com este e-mail.' }, { status: 404 });
+			return json({ error: `Usuário @${username || '?'} não encontrado.` }, { status: 404 });
 		}
 		const targetUser = uRows[0];
 		if (String(targetUser.id) === node.owner_id) {
@@ -107,7 +111,7 @@ export const POST: RequestHandler = async ({ locals, params, request, getClientA
 			action: 'share.user_grant',
 			targetType: node.type,
 			targetId: node.id,
-			details: `Compartilhado "${node.name}" com ${email} (${permission})`,
+			details: `Compartilhado "${node.name}" com @${username} (${permission})`,
 			ipAddress: ip
 		});
 
@@ -117,13 +121,17 @@ export const POST: RequestHandler = async ({ locals, params, request, getClientA
 	if (body.mode === 'link') {
 		if (node.type !== 'file') {
 			return json(
-				{ error: 'Links públicos diretos estão disponíveis para arquivos. Para pastas, compartilhe por usuário.' },
+				{
+					error:
+						'Links públicos diretos estão disponíveis para arquivos. Para pastas, compartilhe por usuário.'
+				},
 				{ status: 400 }
 			);
 		}
 		const id = crypto.randomUUID();
 		const token = generateToken(18);
-		const password = typeof body.password === 'string' && body.password.trim() ? body.password.trim() : null;
+		const password =
+			typeof body.password === 'string' && body.password.trim() ? body.password.trim() : null;
 		const passwordHash = password ? await hashPassword(password) : null;
 		const expiresInHours = Number(body.expiresInHours || 0);
 		const expiresAt =

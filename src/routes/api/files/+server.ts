@@ -10,7 +10,7 @@ function mapNode(row: RowDataPacket, permission: 'owner' | 'editor' | 'viewer' =
 		id: String(row.id),
 		owner_id: String(row.owner_id),
 		owner_name: row.owner_name ? String(row.owner_name) : undefined,
-		owner_email: row.owner_email ? String(row.owner_email) : undefined,
+		owner_username: row.owner_username ? String(row.owner_username) : undefined,
 		parent_id: row.parent_id ? String(row.parent_id) : null,
 		type: row.type === 'folder' ? 'folder' : 'file',
 		name: String(row.name),
@@ -53,7 +53,6 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 	const breadcrumbs: BreadcrumbItem[] = [];
 	let currentPermission: 'owner' | 'editor' | 'viewer' = 'owner';
 
-	// Refresh user's current quota usage
 	const [uRows] = await db.query<RowDataPacket[]>(
 		'SELECT used_bytes, quota_bytes FROM users WHERE id = ? LIMIT 1',
 		[user.id]
@@ -63,10 +62,12 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 		quota_bytes: Number(uRows[0]?.quota_bytes ?? user.quota_bytes)
 	};
 
+	const ownerSelect = `CONCAT(u.first_name, ' ', u.last_name) AS owner_name, u.username AS owner_username`;
+
 	if (search) {
 		const like = `%${search}%`;
 		const [rows] = await db.query<RowDataPacket[]>(
-			`SELECT n.*, u.name AS owner_name, u.email AS owner_email,
+			`SELECT n.*, ${ownerSelect},
 				(SELECT COUNT(*) FROM node_permissions np WHERE np.node_id = n.id) AS share_count,
 				(SELECT COUNT(*) FROM share_links sl WHERE sl.node_id = n.id AND sl.is_active = 1) AS link_count
 			 FROM storage_nodes n
@@ -83,7 +84,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 
 	if (view === 'starred') {
 		const [rows] = await db.query<RowDataPacket[]>(
-			`SELECT n.*, u.name AS owner_name, u.email AS owner_email,
+			`SELECT n.*, ${ownerSelect},
 				(SELECT COUNT(*) FROM node_permissions np WHERE np.node_id = n.id) AS share_count,
 				(SELECT COUNT(*) FROM share_links sl WHERE sl.node_id = n.id AND sl.is_active = 1) AS link_count
 			 FROM storage_nodes n
@@ -99,7 +100,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 
 	if (view === 'recent') {
 		const [rows] = await db.query<RowDataPacket[]>(
-			`SELECT n.*, u.name AS owner_name, u.email AS owner_email,
+			`SELECT n.*, ${ownerSelect},
 				(SELECT COUNT(*) FROM node_permissions np WHERE np.node_id = n.id) AS share_count,
 				(SELECT COUNT(*) FROM share_links sl WHERE sl.node_id = n.id AND sl.is_active = 1) AS link_count
 			 FROM storage_nodes n
@@ -116,7 +117,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 
 	if (view === 'trash') {
 		const [rows] = await db.query<RowDataPacket[]>(
-			`SELECT n.*, u.name AS owner_name, u.email AS owner_email
+			`SELECT n.*, ${ownerSelect}
 			 FROM storage_nodes n
 			 INNER JOIN users u ON u.id = n.owner_id
 			 WHERE n.owner_id = ? AND n.is_trashed = 1
@@ -131,7 +132,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 	if (view === 'shared') {
 		if (!parentId) {
 			const [rows] = await db.query<RowDataPacket[]>(
-				`SELECT n.*, np.permission AS granted_perm, u.name AS owner_name, u.email AS owner_email
+				`SELECT n.*, np.permission AS granted_perm, ${ownerSelect}
 				 FROM node_permissions np
 				 INNER JOIN storage_nodes n ON n.id = np.node_id
 				 INNER JOIN users u ON u.id = n.owner_id
@@ -139,15 +140,12 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 				 ${orderClause}`,
 				[user.id]
 			);
-			nodes = rows.map((r) =>
-				mapNode(r, r.granted_perm === 'editor' ? 'editor' : 'viewer')
-			);
+			nodes = rows.map((r) => mapNode(r, r.granted_perm === 'editor' ? 'editor' : 'viewer'));
 			breadcrumbs.push({ id: null, name: 'Compartilhados comigo' });
 			currentPermission = 'viewer';
 			return json({ nodes, breadcrumbs, currentPermission, quota });
 		}
 
-		// Navigating inside a shared folder
 		const { node: folder, permission } = await getEffectivePermission(user, parentId);
 		if (!folder || !permission || folder.is_trashed) {
 			return json({ error: 'Pasta compartilhada não encontrada ou sem acesso.' }, { status: 403 });
@@ -155,7 +153,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 		currentPermission = permission;
 
 		const [rows] = await db.query<RowDataPacket[]>(
-			`SELECT n.*, u.name AS owner_name, u.email AS owner_email
+			`SELECT n.*, ${ownerSelect}
 			 FROM storage_nodes n
 			 INNER JOIN users u ON u.id = n.owner_id
 			 WHERE n.parent_id = ? AND n.is_trashed = 0
@@ -164,7 +162,6 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 		);
 		nodes = rows.map((r) => mapNode(r, permission));
 
-		// Build breadcrumbs up to the shared root
 		const trail: BreadcrumbItem[] = [];
 		let cursor: string | null = parentId;
 		let guard = 0;
@@ -179,7 +176,6 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 		return json({ nodes, breadcrumbs, currentPermission, quota });
 	}
 
-	// Default view: drive (my files)
 	if (parentId) {
 		const { node: folder, permission } = await getEffectivePermission(user, parentId);
 		if (!folder || !permission || folder.type !== 'folder' || folder.is_trashed) {
@@ -188,7 +184,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 		currentPermission = permission;
 
 		const [rows] = await db.query<RowDataPacket[]>(
-			`SELECT n.*, u.name AS owner_name, u.email AS owner_email,
+			`SELECT n.*, ${ownerSelect},
 				(SELECT COUNT(*) FROM node_permissions np WHERE np.node_id = n.id) AS share_count,
 				(SELECT COUNT(*) FROM share_links sl WHERE sl.node_id = n.id AND sl.is_active = 1) AS link_count
 			 FROM storage_nodes n
@@ -199,7 +195,6 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 		);
 		nodes = rows.map((r) => mapNode(r, permission));
 
-		// Breadcrumbs
 		const trail: BreadcrumbItem[] = [];
 		let cursor: string | null = parentId;
 		let guard = 0;
@@ -213,13 +208,12 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 			cursor = bRows[0].parent_id ? String(bRows[0].parent_id) : null;
 			guard++;
 		}
-		breadcrumbs.push({ id: null, name: 'Meu Drive' }, ...trail);
+		breadcrumbs.push({ id: null, name: 'Meus Arquivos' }, ...trail);
 		return json({ nodes, breadcrumbs, currentPermission, quota });
 	}
 
-	// Root of user's drive
 	const [rows] = await db.query<RowDataPacket[]>(
-		`SELECT n.*, u.name AS owner_name, u.email AS owner_email,
+		`SELECT n.*, ${ownerSelect},
 			(SELECT COUNT(*) FROM node_permissions np WHERE np.node_id = n.id) AS share_count,
 			(SELECT COUNT(*) FROM share_links sl WHERE sl.node_id = n.id AND sl.is_active = 1) AS link_count
 		 FROM storage_nodes n
@@ -229,7 +223,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 		[user.id]
 	);
 	nodes = rows.map((r) => mapNode(r, 'owner'));
-	breadcrumbs.push({ id: null, name: 'Meu Drive' });
+	breadcrumbs.push({ id: null, name: 'Meus Arquivos' });
 
 	return json({ nodes, breadcrumbs, currentPermission: 'owner', quota });
 };

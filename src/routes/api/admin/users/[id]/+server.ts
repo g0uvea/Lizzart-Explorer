@@ -4,7 +4,7 @@ import type { RowDataPacket } from 'mysql2/promise';
 import { getPool } from '$lib/server/db';
 import { hashPassword } from '$lib/server/crypto';
 import { deleteDiskBlobIfUnreferenced } from '$lib/server/storage';
-import { logAudit } from '$lib/server/auth';
+import { logAudit, MIN_USER_QUOTA_GB } from '$lib/server/auth';
 
 export const PATCH: RequestHandler = async ({ locals, params, request, getClientAddress }) => {
 	if (!locals.user || locals.user.role !== 'admin') {
@@ -18,15 +18,19 @@ export const PATCH: RequestHandler = async ({ locals, params, request, getClient
 	const targetId = params.id;
 
 	if (targetId === locals.user.id && (body.role === 'user' || body.is_active === false)) {
-		return json({ error: 'Você não pode rebaixar ou desativar sua própria conta.' }, { status: 400 });
+		return json({ error: 'Você não pode rebaixar ou suspender sua própria conta.' }, { status: 400 });
 	}
 
 	const updates: string[] = [];
 	const values: unknown[] = [];
 
-	if (typeof body.name === 'string' && body.name.trim().length >= 2) {
-		updates.push('name = ?');
-		values.push(body.name.trim());
+	if (typeof body.first_name === 'string' && body.first_name.trim().length >= 2) {
+		updates.push('first_name = ?');
+		values.push(body.first_name.trim());
+	}
+	if (typeof body.last_name === 'string' && body.last_name.trim().length >= 2) {
+		updates.push('last_name = ?');
+		values.push(body.last_name.trim());
 	}
 	if (body.role === 'admin' || body.role === 'user') {
 		updates.push('role = ?');
@@ -38,6 +42,12 @@ export const PATCH: RequestHandler = async ({ locals, params, request, getClient
 	}
 	if (body.quota_gb !== undefined) {
 		const gb = Number(body.quota_gb);
+		if (gb >= 0 && gb < MIN_USER_QUOTA_GB) {
+			return json(
+				{ error: `A cota mínima permitida é de ${MIN_USER_QUOTA_GB} GB (ou ilimitada).` },
+				{ status: 400 }
+			);
+		}
 		updates.push('quota_bytes = ?');
 		values.push(gb < 0 ? -1 : Math.round(gb * 1024 * 1024 * 1024));
 	}
@@ -45,6 +55,9 @@ export const PATCH: RequestHandler = async ({ locals, params, request, getClient
 		const hash = await hashPassword(body.new_password);
 		updates.push('password_hash = ?');
 		values.push(hash);
+	}
+	if (body.reset_2fa === true) {
+		updates.push('totp_enabled = 0, totp_secret = NULL');
 	}
 
 	if (updates.length === 0) {
@@ -63,7 +76,7 @@ export const PATCH: RequestHandler = async ({ locals, params, request, getClient
 		action: 'admin.user_update',
 		targetType: 'user',
 		targetId,
-		details: `Conta atualizada pelo admin`,
+		details: 'Conta atualizada pelo administrador',
 		ipAddress: getClientAddress()
 	});
 
