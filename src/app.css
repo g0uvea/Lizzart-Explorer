@@ -28,12 +28,28 @@ html[data-density='compact'] {
 	font-size: 13.75px;
 }
 
+/* Ultra-optimized hardware mode: removes GPU-heavy blurs and extra transitions */
+html[data-perf='ultra_optimized'] *,
+html[data-perf='ultra_optimized'] *::before,
+html[data-perf='ultra_optimized'] *::after {
+	backdrop-filter: none !important;
+	-webkit-backdrop-filter: none !important;
+}
+
+html,
+body {
+	max-width: 100%;
+	overflow-x: hidden;
+	overscroll-behavior-x: none;
+}
+
 body {
 	font-family: var(--font-sans);
 	background-color: #0b101b;
 	color: #e2e8f0;
 	user-select: none;
 	-webkit-user-select: none;
+	-webkit-tap-highlight-color: transparent;
 }
 
 /* Allow text selection only where intentional (inputs, code previews, secrets) */
@@ -49,6 +65,20 @@ code,
 ::selection {
 	background-color: rgb(var(--accent-rgb) / 0.32);
 	color: #ffffff;
+}
+
+/* Hide scrollbars cleanly for horizontal mobile tab/breadcrumb bars */
+.no-scrollbar::-webkit-scrollbar {
+	display: none;
+}
+.no-scrollbar {
+	-ms-overflow-style: none;
+	scrollbar-width: none;
+}
+
+/* Safe area padding helper for notched mobile devices */
+.pb-safe {
+	padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
 }
 
 /* Custom sleek scrollbars */

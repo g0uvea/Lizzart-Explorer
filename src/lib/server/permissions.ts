@@ -1,12 +1,17 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { getPool } from '$lib/server/db';
+import {
+	getWorkspaceMembership,
+	workspaceRoleToEffectivePermission
+} from '$lib/server/workspaces';
 import type { SafeUser } from '$lib/types';
 
 export type EffectivePermission = 'owner' | 'editor' | 'viewer' | null;
 
 export interface NodeRow extends RowDataPacket {
 	id: string;
-	owner_id: string;
+	workspace_id: string;
+	created_by: string | null;
 	parent_id: string | null;
 	type: 'folder' | 'file';
 	name: string;
@@ -30,8 +35,11 @@ export async function getNodeById(nodeId: string): Promise<NodeRow | null> {
 }
 
 /**
- * Computes effective permission for a user on a node, checking ownership,
- * direct share permissions, and inherited folder share permissions up the tree.
+ * Computes effective permission for a user on a node:
+ * 1. Workspace membership (`manager` -> 'owner', `editor` -> 'editor', `viewer` -> 'viewer')
+ * 2. Direct or ancestor-inherited `node_permissions` (for cross-workspace sharing)
+ * Note: Admins have NO implicit file access to disconnected workspaces — they must be
+ * connected to the workspace explicitly via the Admin Panel.
  */
 export async function getEffectivePermission(
 	user: SafeUser,
@@ -41,11 +49,17 @@ export async function getEffectivePermission(
 	const node = await getNodeById(nodeId);
 	if (!node) return { node: null, permission: null };
 
-	if (node.owner_id === user.id) {
+	// 1. Check workspace membership
+	const membership = await getWorkspaceMembership(user.id, node.workspace_id);
+	const wsPerm: EffectivePermission = membership
+		? workspaceRoleToEffectivePermission(membership.role)
+		: null;
+
+	if (wsPerm === 'owner') {
 		return { node, permission: 'owner' };
 	}
 
-	// Walk up the ancestor chain (max 32 levels to prevent cycles)
+	// 2. Check direct or inherited node_permissions (cross-workspace share or elevated share)
 	const ancestorIds: string[] = [node.id];
 	let currentParent = node.parent_id;
 	let depth = 0;
@@ -67,10 +81,10 @@ export async function getEffectivePermission(
 		[user.id, ...ancestorIds]
 	);
 
-	if (permRows.some((r) => r.permission === 'editor')) {
+	if (permRows.some((r) => r.permission === 'editor') || wsPerm === 'editor') {
 		return { node, permission: 'editor' };
 	}
-	if (permRows.some((r) => r.permission === 'viewer')) {
+	if (permRows.some((r) => r.permission === 'viewer') || wsPerm === 'viewer') {
 		return { node, permission: 'viewer' };
 	}
 

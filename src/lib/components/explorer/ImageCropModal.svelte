@@ -253,32 +253,33 @@
 	let pctHeight = $derived(naturalH ? (cropH / naturalH) * 100 : 100);
 </script>
 
-<div class="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-	<div class="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#233047] bg-[#111929] shadow-2xl">
+<div class="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-2 backdrop-blur-sm sm:p-4">
+	<div class="flex max-h-[95dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#233047] bg-[#111929] shadow-2xl">
 		<!-- Header -->
-		<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[#1f2d45] px-5 py-3.5">
-			<div class="flex items-center gap-2.5">
-				<div class="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-500/15 text-accent-400">
+		<div class="flex items-center justify-between gap-2 border-b border-[#1f2d45] px-3.5 py-3 sm:px-5 sm:py-3.5">
+			<div class="flex min-w-0 items-center gap-2.5">
+				<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-500/15 text-accent-400">
 					<Crop class="h-4 w-4" />
 				</div>
-				<div>
-					<h3 class="text-sm font-semibold text-white">Recortar Bordas — {node.name}</h3>
-					<p class="text-[11px] text-slate-400">
-						Exportação em PNG lossless (resolução nativa preservada, sem perda de qualidade)
+				<div class="min-w-0">
+					<h3 class="truncate text-sm font-semibold text-white">Recortar Bordas — {node.name}</h3>
+					<p class="truncate text-[11px] text-slate-400">
+						Exportação em PNG lossless (resolução nativa preservada)
 					</p>
 				</div>
 			</div>
 			<button
 				type="button"
 				onclick={onClose}
-				class="rounded-lg p-1.5 text-slate-400 hover:bg-[#1b273d] hover:text-white"
+				class="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-[#1b273d] hover:text-white"
+				aria-label="Fechar"
 			>
 				<X class="h-4 w-4" />
 			</button>
 		</div>
 
 		<!-- Tools bar -->
-		<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[#1f2d45] bg-[#0e1525] px-5 py-2.5 text-xs">
+		<div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#1f2d45] bg-[#0e1525] px-3.5 py-2 text-xs sm:px-5 sm:py-2.5">
 			<div class="flex flex-wrap items-center gap-2">
 				<button
 					type="button"
@@ -332,11 +333,11 @@
 					<div class="pointer-events-none absolute left-0 bg-black/65" style="top: {pctTop}%; height: {pctHeight}%; width: {pctLeft}%"></div>
 					<div class="pointer-events-none absolute right-0 bg-black/65" style="top: {pctTop}%; height: {pctHeight}%; width: {Math.max(0, 100 - pctLeft - pctWidth)}%"></div>
 
-					<!-- Crop Frame -->
+					<!-- Crop Frame (touch-none ensures smooth touch dragging on mobile!) -->
 					<div
 						onpointerdown={(e) => startDrag('move', e)}
 						role="presentation"
-						class="absolute cursor-move border-2 border-accent-400 shadow-[0_0_0_1px_rgba(0,0,0,0.6)]"
+						class="absolute cursor-move touch-none border-2 border-accent-400 shadow-[0_0_0_1px_rgba(0,0,0,0.6)]"
 						style="left: {pctLeft}%; top: {pctTop}%; width: {pctWidth}%; height: {pctHeight}%"
 					>
 						<!-- Rule of thirds guides -->

@@ -2,9 +2,40 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { RowDataPacket } from 'mysql2/promise';
 import { getPool } from '$lib/server/db';
-import { removeTempFile, writeChunkAtOffset } from '$lib/server/storage';
+import {
+	getFileStat,
+	MAX_UPLOAD_CHUNK_BYTES,
+	removeTempFile,
+	writeChunkStreamAtOffset
+} from '$lib/server/storage';
 
-const MAX_CHUNK_BYTES = 64 * 1024 * 1024 + 1024; // 64 MB max adaptive chunk
+export const GET: RequestHandler = async ({ locals, params }) => {
+	if (!locals.user) return json({ error: 'Não autenticado.' }, { status: 401 });
+
+	const db = getPool();
+	const [rows] = await db.query<RowDataPacket[]>(
+		'SELECT * FROM upload_sessions WHERE id = ? AND user_id = ? LIMIT 1',
+		[params.uploadId, locals.user.id]
+	);
+	if (rows.length === 0) {
+		return json({ error: 'Sessão de upload não encontrada.' }, { status: 404 });
+	}
+	const s = rows[0];
+	let diskSize = 0;
+	try {
+		const stat = await getFileStat(String(s.temp_path));
+		diskSize = stat.size;
+	} catch {
+		diskSize = 0;
+	}
+	const confirmedBytes = Math.min(diskSize, Number(s.uploaded_bytes), Number(s.total_bytes));
+	return json({
+		uploadId: String(s.id),
+		status: String(s.status),
+		totalBytes: Number(s.total_bytes),
+		uploadedBytes: confirmedBytes
+	});
+};
 
 export const PUT: RequestHandler = async ({ locals, params, request }) => {
 	if (!locals.user) return json({ error: 'Não autenticado.' }, { status: 401 });
@@ -22,33 +53,66 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
 	const session = rows[0];
 	const offset = Number(request.headers.get('x-chunk-offset') ?? '-1');
 	const totalBytes = Number(session.total_bytes);
+	const currentUploaded = Number(session.uploaded_bytes);
+	const expectedSha = request.headers.get('x-chunk-sha256')?.trim() || null;
 
-	if (Number.isNaN(offset) || offset < 0 || offset > totalBytes) {
-		return json({ error: 'Offset de chunk inválido.' }, { status: 400 });
+	// Enforce sequential/non-gapped offsets so sparse holes can never corrupt files after power loss
+	if (Number.isNaN(offset) || offset < 0 || offset > totalBytes || offset > currentUploaded) {
+		return json(
+			{
+				error: 'Offset de chunk inválido ou fora de sequência.',
+				expectedOffset: currentUploaded
+			},
+			{ status: 409 }
+		);
 	}
 
-	const rawBuf = new Uint8Array(await request.arrayBuffer());
-	if (rawBuf.byteLength > MAX_CHUNK_BYTES) {
-		return json({ error: 'Chunk excede o tamanho máximo de 64 MB.' }, { status: 413 });
+	// Fast reject declared oversized chunks before reading body
+	const contentLength = Number(request.headers.get('content-length') || 0);
+	if (contentLength > MAX_UPLOAD_CHUNK_BYTES) {
+		return json(
+			{ error: 'Chunk excede o limite máximo permitido de 20 MB.' },
+			{ status: 413 }
+		);
 	}
-	if (offset + rawBuf.byteLength > totalBytes) {
-		return json({ error: 'Chunk ultrapassa o tamanho total declarado do arquivo.' }, { status: 400 });
+
+	if (!request.body) {
+		return json({ error: 'Corpo do bloco vazio.' }, { status: 400 });
 	}
 
-	const newEnd = offset + rawBuf.byteLength;
-	await writeChunkAtOffset(String(session.temp_path), offset, rawBuf);
+	try {
+		const { bytesWritten, sha256 } = await writeChunkStreamAtOffset({
+			tempRelPath: String(session.temp_path),
+			offset,
+			totalBytes,
+			body: request.body,
+			maxChunkBytes: MAX_UPLOAD_CHUNK_BYTES,
+			expectedSha256: expectedSha
+		});
 
-	const uploadedBytes = Math.max(Number(session.uploaded_bytes), newEnd);
-	await db.query('UPDATE upload_sessions SET uploaded_bytes = ? WHERE id = ?', [
-		uploadedBytes,
-		session.id
-	]);
+		const newEnd = offset + bytesWritten;
+		const uploadedBytes = Math.max(currentUploaded, newEnd);
+		await db.query('UPDATE upload_sessions SET uploaded_bytes = ? WHERE id = ?', [
+			uploadedBytes,
+			session.id
+		]);
 
-	return json({
-		ok: true,
-		uploadedBytes,
-		chunkBytes: rawBuf.byteLength
-	});
+		return json({
+			ok: true,
+			uploadedBytes,
+			chunkBytes: bytesWritten,
+			chunkSha256: sha256
+		});
+	} catch (err) {
+		const statusCode =
+			typeof (err as { statusCode?: number })?.statusCode === 'number'
+				? (err as { statusCode: number }).statusCode
+				: 500;
+		return json(
+			{ error: err instanceof Error ? err.message : 'Erro ao gravar bloco no disco.' },
+			{ status: statusCode }
+		);
+	}
 };
 
 export const DELETE: RequestHandler = async ({ locals, params }) => {
@@ -61,7 +125,9 @@ export const DELETE: RequestHandler = async ({ locals, params }) => {
 	);
 	if (rows.length > 0) {
 		await removeTempFile(String(rows[0].temp_path));
-		await db.query("UPDATE upload_sessions SET status = 'aborted' WHERE id = ?", [params.uploadId]);
+		await db.query("UPDATE upload_sessions SET status = 'aborted' WHERE id = ?", [
+			params.uploadId
+		]);
 	}
 
 	return json({ ok: true });

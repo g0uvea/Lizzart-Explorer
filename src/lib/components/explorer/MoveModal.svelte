@@ -6,11 +6,12 @@
 
 	interface Props {
 		nodes: StorageNode[];
+		workspaceId: string;
 		onClose: () => void;
 		onMoved: () => void;
 	}
 
-	let { nodes, onClose, onMoved }: Props = $props();
+	let { nodes, workspaceId, onClose, onMoved }: Props = $props();
 
 	interface FolderOption {
 		id: string;
@@ -27,7 +28,9 @@
 		const excludedIds = new Set(nodes.map((n) => n.id));
 		selectedParent = nodes.length === 1 ? nodes[0].parent_id : null;
 		try {
-			const res = await fetch('/api/files/folders');
+			const res = await fetch(
+				`/api/files/folders?workspaceId=${encodeURIComponent(workspaceId)}`
+			);
 			const data = await res.json();
 			if (res.ok) {
 				folders = (data.folders as FolderOption[]).filter((f) => !excludedIds.has(f.id));
@@ -65,18 +68,18 @@
 	}
 </script>
 
-<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-	<div class="w-full max-w-md overflow-hidden rounded-2xl border border-[#233047] bg-[#131c2e] shadow-2xl">
-		<div class="flex items-center justify-between border-b border-[#1f2d45] px-5 py-4">
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm sm:p-4">
+	<div class="flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-[#233047] bg-[#131c2e] shadow-2xl">
+		<div class="flex items-center justify-between gap-2 border-b border-[#1f2d45] px-4 py-3.5 sm:px-5 sm:py-4">
 			<h3 class="truncate text-sm font-semibold text-white">
 				Mover {nodes.length === 1 ? `"${nodes[0].name}"` : `${nodes.length} itens`}
 			</h3>
-			<button type="button" onclick={onClose} class="rounded-lg p-1 text-slate-400 hover:text-white">
+			<button type="button" onclick={onClose} class="shrink-0 rounded-lg p-1 text-slate-400 hover:text-white" aria-label="Fechar">
 				<X class="h-4 w-4" />
 			</button>
 		</div>
 
-		<div class="max-h-72 space-y-1.5 overflow-y-auto p-4">
+		<div class="flex-1 space-y-1.5 overflow-y-auto p-3.5 sm:p-4">
 			<button
 				type="button"
 				onclick={() => (selectedParent = null)}
@@ -84,12 +87,12 @@
 					? 'border-accent-500 bg-accent-500/15 text-white'
 					: 'border-transparent bg-[#0e1525] text-slate-300 hover:border-[#233047]'}"
 			>
-				<span class="flex items-center gap-2.5">
-					<HardDrive class="h-4 w-4 text-accent-400" />
-					Meus Arquivos (Raiz)
+				<span class="flex min-w-0 items-center gap-2.5">
+					<HardDrive class="h-4 w-4 shrink-0 text-accent-400" />
+					<span class="truncate">Raiz da Workspace</span>
 				</span>
 				{#if selectedParent === null}
-					<Check class="h-4 w-4 text-accent-400" />
+					<Check class="h-4 w-4 shrink-0 text-accent-400" />
 				{/if}
 			</button>
 
@@ -104,7 +107,7 @@
 							? 'border-accent-500 bg-accent-500/15 text-white'
 							: 'border-transparent bg-[#0e1525] text-slate-300 hover:border-[#233047]'}"
 					>
-						<span class="flex items-center gap-2.5 truncate">
+						<span class="flex min-w-0 items-center gap-2.5">
 							<Folder class="h-4 w-4 shrink-0 text-accent-400" />
 							<span class="truncate">{f.name}</span>
 						</span>
@@ -116,7 +119,7 @@
 			{/if}
 		</div>
 
-		<div class="flex justify-end gap-2 border-t border-[#1f2d45] bg-[#0e1525] px-5 py-3.5">
+		<div class="flex justify-end gap-2 border-t border-[#1f2d45] bg-[#0e1525] px-4 py-3 sm:px-5 sm:py-3.5">
 			<button
 				type="button"
 				onclick={onClose}

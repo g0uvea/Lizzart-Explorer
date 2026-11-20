@@ -1,9 +1,12 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { quotaStore } from '$lib/stores/quota.svelte';
+	import { workspaceStore } from '$lib/stores/workspace.svelte';
 	import { themeStore } from '$lib/stores/theme.svelte';
 	import { dragStore, LIZZART_DRAG_MIME } from '$lib/stores/drag.svelte';
+	import { transferManager } from '$lib/stores/transfers.svelte';
 	import { toast } from '$lib/stores/toast.svelte';
 	import { formatBytes, getInitials } from '$lib/utils';
 	import {
@@ -18,25 +21,47 @@
 		Menu,
 		X,
 		Settings,
-		Database
+		Database,
+		Layers,
+		ChevronDown,
+		Check,
+		Plus
 	} from 'lucide-svelte';
 
 	let { data, children } = $props();
 	let mobileOpen = $state(false);
+	let wsDropdownOpen = $state(false);
 	let sidebarDropTarget = $state<'root' | 'starred' | 'trash' | null>(null);
+
+	onMount(() => {
+		transferManager.restorePendingTransfers(() => {
+			dragStore.notifyChanged();
+		});
+	});
 
 	$effect(() => {
 		if (data.user) {
-			quotaStore.sync(data.user.used_bytes, data.user.quota_bytes);
 			themeStore.init(data.user.accent_color, data.user.layout_density);
+		}
+		const urlWs = $page.url.searchParams.get('ws');
+		workspaceStore.sync(data.workspaces || [], urlWs);
+	});
+
+	$effect(() => {
+		const activeWs = workspaceStore.active;
+		if (activeWs) {
+			quotaStore.sync(activeWs.used_bytes, activeWs.quota_bytes, activeWs.name);
+		} else {
+			quotaStore.clear();
 		}
 	});
 
 	let currentPath = $derived($page.url.pathname);
 	let currentView = $derived($page.url.searchParams.get('view') || 'drive');
+	let activeWs = $derived(workspaceStore.active);
 
 	let quotaBarPercent = $derived.by(() => {
-		if (quotaStore.usedBytes <= 0) return 0;
+		if (!quotaStore.hasWorkspace || quotaStore.usedBytes <= 0) return 0;
 		if (quotaStore.quotaBytes < 0) {
 			return Math.min(100, Math.max(3, Math.round(Math.log10(quotaStore.usedBytes / 1024 + 1) * 12)));
 		}
@@ -49,6 +74,36 @@
 			return currentPath === '/' && currentView === (view || 'drive');
 		}
 		return currentPath.startsWith(path);
+	}
+
+	function roleLabel(role: string): string {
+		if (role === 'manager') return 'Gestor';
+		if (role === 'editor') return 'Editor';
+		return 'Leitor';
+	}
+
+	function selectWorkspace(wsId: string) {
+		workspaceStore.setActive(wsId);
+		wsDropdownOpen = false;
+		mobileOpen = false;
+		if (currentPath === '/') {
+			const params = new URLSearchParams();
+			params.set('ws', wsId);
+			if (currentView !== 'drive' && currentView !== 'shared') {
+				params.set('view', currentView);
+			}
+			goto(`/?${params.toString()}`);
+		} else {
+			goto(`/?ws=${encodeURIComponent(wsId)}`);
+		}
+	}
+
+	function navHref(viewName?: string): string {
+		const params = new URLSearchParams();
+		if (viewName && viewName !== 'drive') params.set('view', viewName);
+		if (activeWs && viewName !== 'shared') params.set('ws', activeWs.id);
+		const qs = params.toString();
+		return qs ? `/?${qs}` : '/';
 	}
 
 	function onNavDragOver(e: DragEvent, target: 'root' | 'starred' | 'trash') {
@@ -67,7 +122,7 @@
 
 		if (target === 'root') {
 			for (const item of items) {
-				if (item.permission !== 'owner') continue;
+				if (item.permission !== 'owner' && item.permission !== 'editor') continue;
 				await fetch(`/api/files/${item.id}`, {
 					method: 'PATCH',
 					headers: { 'Content-Type': 'application/json' },
@@ -76,13 +131,13 @@
 			}
 			toast.success(
 				items.length === 1
-					? `"${items[0].name}" movido para a raiz de Meus Arquivos!`
-					: `${items.length} itens movidos para a raiz de Meus Arquivos!`
+					? `"${items[0].name}" movido para a raiz da workspace!`
+					: `${items.length} itens movidos para a raiz da workspace!`
 			);
 			dragStore.notifyChanged();
 		} else if (target === 'starred') {
 			for (const item of items) {
-				if (item.permission !== 'owner') continue;
+				if (item.permission !== 'owner' && item.permission !== 'editor') continue;
 				await fetch(`/api/files/${item.id}`, {
 					method: 'PATCH',
 					headers: { 'Content-Type': 'application/json' },
@@ -121,47 +176,138 @@
 	{#if mobileOpen}
 		<button
 			type="button"
-			onclick={() => (mobileOpen = false)}
-			class="fixed inset-0 z-30 bg-black/60 backdrop-blur-xs lg:hidden"
+			onclick={() => {
+				mobileOpen = false;
+				wsDropdownOpen = false;
+			}}
+			class="fixed inset-0 z-30 bg-black/65 backdrop-blur-xs lg:hidden"
 			aria-label="Fechar menu"
 		></button>
 	{/if}
 
 	<!-- Sidebar -->
 	<aside
-		class="fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-[#1a253a] bg-[#0e1525] transition-transform duration-200 lg:static lg:translate-x-0 {mobileOpen
+		class="fixed inset-y-0 left-0 z-40 flex w-[82vw] max-w-72 shrink-0 flex-col border-r border-[#1a253a] bg-[#0e1525] transition-transform duration-200 lg:static lg:w-64 lg:translate-x-0 {mobileOpen
 			? 'translate-x-0'
 			: '-translate-x-full'}"
 	>
 		<!-- Brand -->
-		<div class="flex items-center justify-between px-5 py-5">
-			<a href="/" onclick={() => (mobileOpen = false)} class="flex items-center gap-3">
-				<div class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-accent-500 to-accent-700 shadow-lg shadow-accent-600/25">
+		<div class="flex items-center justify-between px-4 py-4 sm:px-5">
+			<a href={navHref('drive')} onclick={() => (mobileOpen = false)} class="flex min-w-0 items-center gap-3">
+				<div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-accent-500 to-accent-700 shadow-lg shadow-accent-600/25">
 					<HardDrive class="h-5 w-5 text-white" />
 				</div>
-				<div>
-					<span class="block text-sm font-bold tracking-tight text-white">Lizzart Explorer</span>
-					<span class="block text-[11px] text-slate-400">Cloud + Admin Suite</span>
+				<div class="min-w-0">
+					<span class="block truncate text-sm font-bold tracking-tight text-white">Lizzart Explorer</span>
+					<span class="block truncate text-[11px] text-slate-400">Cloud + Workspaces</span>
 				</div>
 			</a>
 			<button
 				type="button"
 				onclick={() => (mobileOpen = false)}
-				class="rounded-lg p-1.5 text-slate-400 hover:bg-[#19253c] hover:text-white lg:hidden"
+				class="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-[#19253c] hover:text-white lg:hidden"
+				aria-label="Fechar menu lateral"
 			>
 				<X class="h-5 w-5" />
 			</button>
 		</div>
 
+		<!-- Workspace Switcher -->
+		<div class="relative px-3 pb-3">
+			{#if activeWs}
+				<button
+					type="button"
+					onclick={() => (wsDropdownOpen = !wsDropdownOpen)}
+					class="flex w-full items-center justify-between gap-2 rounded-xl border border-[#1f2d45] bg-[#131c2e] px-3 py-2.5 text-left transition hover:border-accent-500/40"
+				>
+					<div class="flex min-w-0 items-center gap-2.5">
+						<span
+							class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-white shadow"
+							style="background-color: {activeWs.color}"
+						>
+							<Layers class="h-3.5 w-3.5" />
+						</span>
+						<div class="min-w-0">
+							<p class="truncate text-xs font-semibold text-white">{activeWs.name}</p>
+							<p class="truncate text-[10px] text-slate-400">
+								Workspace • {roleLabel(activeWs.role)}
+							</p>
+						</div>
+					</div>
+					<ChevronDown class="h-4 w-4 shrink-0 text-slate-400 transition {wsDropdownOpen ? 'rotate-180' : ''}" />
+				</button>
+
+				{#if wsDropdownOpen}
+					<div class="absolute inset-x-3 top-full z-50 mt-1 max-h-60 overflow-y-auto rounded-xl border border-[#2a3b58] bg-[#111929] p-1.5 shadow-2xl">
+						<p class="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+							Suas Workspaces ({workspaceStore.workspaces.length})
+						</p>
+						{#each workspaceStore.workspaces as ws (ws.id)}
+							<button
+								type="button"
+								onclick={() => selectWorkspace(ws.id)}
+								class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition {ws.id === activeWs.id
+									? 'bg-accent-500/15 text-white'
+									: 'text-slate-300 hover:bg-[#19253c]'}"
+							>
+								<span class="flex min-w-0 items-center gap-2">
+									<span class="h-2.5 w-2.5 shrink-0 rounded-full" style="background-color: {ws.color}"></span>
+									<span class="truncate font-medium">{ws.name}</span>
+								</span>
+								<span class="flex shrink-0 items-center gap-1.5">
+									<span class="text-[10px] text-slate-500">{roleLabel(ws.role)}</span>
+									{#if ws.id === activeWs.id}
+										<Check class="h-3.5 w-3.5 text-accent-400" />
+									{/if}
+								</span>
+							</button>
+						{/each}
+						{#if data.user.role === 'admin'}
+							<div class="my-1 border-t border-[#1f2d45]"></div>
+							<a
+								href="/admin"
+								onclick={() => {
+									wsDropdownOpen = false;
+									mobileOpen = false;
+								}}
+								class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium text-accent-300 hover:bg-accent-500/15"
+							>
+								<Plus class="h-3.5 w-3.5" />
+								Gerenciar Workspaces
+							</a>
+						{/if}
+					</div>
+				{/if}
+			{:else}
+				<div class="rounded-xl border border-dashed border-[#233047] bg-[#111929]/70 px-3 py-2.5 text-xs">
+					<div class="flex items-center gap-2 text-slate-300">
+						<Layers class="h-4 w-4 shrink-0 text-slate-500" />
+						<span class="truncate font-medium">Nenhuma workspace</span>
+					</div>
+					{#if data.user.role === 'admin'}
+						<a
+							href="/admin"
+							onclick={() => (mobileOpen = false)}
+							class="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-accent-400 hover:underline"
+						>
+							<Plus class="h-3 w-3" /> Criar / Conectar no Admin
+						</a>
+					{:else}
+						<p class="mt-1 text-[10px] text-slate-500">Aguardando vínculo pelo Admin</p>
+					{/if}
+				</div>
+			{/if}
+		</div>
+
 		<!-- Navigation -->
-		<nav class="flex-1 space-y-6 overflow-y-auto px-3 py-2">
+		<nav class="flex-1 space-y-5 overflow-y-auto px-3 py-1">
 			<div>
 				<p class="mb-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
 					Armazenamento
 				</p>
 				<div class="space-y-1">
 					<a
-						href="/"
+						href={navHref('drive')}
 						onclick={() => (mobileOpen = false)}
 						ondragover={(e) => onNavDragOver(e, 'root')}
 						ondragleave={() => {
@@ -174,21 +320,21 @@
 								? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
 								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 					>
-						<HardDrive class="h-4 w-4 {isNavActive('/', 'drive') || sidebarDropTarget === 'root' ? 'text-accent-400' : ''}" />
-						Meus Arquivos
+						<HardDrive class="h-4 w-4 shrink-0 {isNavActive('/', 'drive') || sidebarDropTarget === 'root' ? 'text-accent-400' : ''}" />
+						<span class="truncate">Arquivos</span>
 					</a>
 					<a
-						href="/?view=recent"
+						href={navHref('recent')}
 						onclick={() => (mobileOpen = false)}
 						class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition {isNavActive('/', 'recent')
 							? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
 							: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 					>
-						<Clock class="h-4 w-4 {isNavActive('/', 'recent') ? 'text-accent-400' : ''}" />
-						Recentes
+						<Clock class="h-4 w-4 shrink-0 {isNavActive('/', 'recent') ? 'text-accent-400' : ''}" />
+						<span class="truncate">Recentes</span>
 					</a>
 					<a
-						href="/?view=starred"
+						href={navHref('starred')}
 						onclick={() => (mobileOpen = false)}
 						ondragover={(e) => onNavDragOver(e, 'starred')}
 						ondragleave={() => {
@@ -201,21 +347,21 @@
 								? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
 								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 					>
-						<Star class="h-4 w-4 {isNavActive('/', 'starred') || sidebarDropTarget === 'starred' ? 'text-amber-400' : ''}" />
-						Favoritos
+						<Star class="h-4 w-4 shrink-0 {isNavActive('/', 'starred') || sidebarDropTarget === 'starred' ? 'text-amber-400' : ''}" />
+						<span class="truncate">Favoritos</span>
 					</a>
 					<a
-						href="/?view=shared"
+						href={navHref('shared')}
 						onclick={() => (mobileOpen = false)}
 						class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition {isNavActive('/', 'shared')
 							? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
 							: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 					>
-						<Users class="h-4 w-4 {isNavActive('/', 'shared') ? 'text-accent-400' : ''}" />
-						Compartilhados
+						<Users class="h-4 w-4 shrink-0 {isNavActive('/', 'shared') ? 'text-accent-400' : ''}" />
+						<span class="truncate">Compartilhados</span>
 					</a>
 					<a
-						href="/?view=trash"
+						href={navHref('trash')}
 						onclick={() => (mobileOpen = false)}
 						ondragover={(e) => onNavDragOver(e, 'trash')}
 						ondragleave={() => {
@@ -228,8 +374,8 @@
 								? 'bg-[#19253c] text-white shadow-xs ring-1 ring-rose-500/40'
 								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 					>
-						<Trash2 class="h-4 w-4 {isNavActive('/', 'trash') || sidebarDropTarget === 'trash' ? 'text-rose-400' : ''}" />
-						Lixeira
+						<Trash2 class="h-4 w-4 shrink-0 {isNavActive('/', 'trash') || sidebarDropTarget === 'trash' ? 'text-rose-400' : ''}" />
+						<span class="truncate">Lixeira</span>
 					</a>
 				</div>
 			</div>
@@ -241,29 +387,29 @@
 					</p>
 					<div class="space-y-1">
 						<a
-							href="/minecraft"
-							onclick={() => (mobileOpen = false)}
-							class="flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition {isNavActive('/minecraft')
-								? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
-								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
-						>
-							<span class="flex items-center gap-3">
-								<Server class="h-4 w-4 {isNavActive('/minecraft') ? 'text-accent-400' : ''}" />
-								Servidores MC
-							</span>
-							<span class="rounded-md bg-accent-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-300">
-								UI
-							</span>
-						</a>
-						<a
 							href="/admin"
 							onclick={() => (mobileOpen = false)}
 							class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition {isNavActive('/admin')
 								? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
 								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 						>
-							<Shield class="h-4 w-4 {isNavActive('/admin') ? 'text-accent-400' : ''}" />
-							Painel Admin
+							<Shield class="h-4 w-4 shrink-0 {isNavActive('/admin') ? 'text-accent-400' : ''}" />
+							<span class="truncate">Painel Admin</span>
+						</a>
+						<a
+							href="/minecraft"
+							onclick={() => (mobileOpen = false)}
+							class="flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition {isNavActive('/minecraft')
+								? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
+								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
+						>
+							<span class="flex min-w-0 items-center gap-3">
+								<Server class="h-4 w-4 shrink-0 {isNavActive('/minecraft') ? 'text-accent-400' : ''}" />
+								<span class="truncate">Servidores MC</span>
+							</span>
+							<span class="shrink-0 rounded-md bg-accent-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-300">
+								UI
+							</span>
 						</a>
 					</div>
 				</div>
@@ -280,43 +426,50 @@
 						? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
 						: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 				>
-					<Settings class="h-4 w-4 {isNavActive('/profile') ? 'text-accent-400' : ''}" />
-					Configurações
+					<Settings class="h-4 w-4 shrink-0 {isNavActive('/profile') ? 'text-accent-400' : ''}" />
+					<span class="truncate">Configurações</span>
 				</a>
 			</div>
 		</nav>
 
-		<!-- Storage Quota Widget -->
-		<div class="mx-3 mb-3 rounded-xl border border-[#1f2d45] bg-[#131c2e] p-3.5">
-			<div class="mb-2 flex items-center justify-between text-xs">
-				<span class="flex items-center gap-1.5 font-medium text-slate-300">
-					<Database class="h-3.5 w-3.5 text-accent-400" />
-					Armazenamento
-				</span>
-				<span class="font-mono text-[11px] text-slate-400">
-					{quotaStore.quotaBytes < 0 ? '∞' : `${quotaBarPercent}%`}
-				</span>
-			</div>
-			<div class="h-2 w-full overflow-hidden rounded-full bg-[#0b101b]">
-				{#if quotaBarPercent > 0}
-					<div
-						class="h-full rounded-full transition-all duration-500 {quotaBarPercent > 85
-							? 'bg-rose-500'
-							: quotaBarPercent > 65
-								? 'bg-amber-500'
-								: 'bg-accent-500'}"
-						style="width: {quotaBarPercent}%"
-					></div>
-				{/if}
-			</div>
-			<p class="mt-2 text-[11px] text-slate-400">
-				<strong class="text-slate-200">{formatBytes(quotaStore.usedBytes)}</strong> de
-				{formatBytes(quotaStore.quotaBytes)}
-			</p>
+		<!-- Active Workspace Storage Quota Widget -->
+		<div class="mx-3 mb-3 rounded-xl border border-[#1f2d45] bg-[#131c2e] p-3">
+			{#if quotaStore.hasWorkspace}
+				<div class="mb-2 flex items-center justify-between gap-2 text-xs">
+					<span class="flex min-w-0 items-center gap-1.5 font-medium text-slate-300">
+						<Database class="h-3.5 w-3.5 shrink-0 text-accent-400" />
+						<span class="truncate">{quotaStore.workspaceName || 'Workspace'}</span>
+					</span>
+					<span class="shrink-0 font-mono text-[11px] text-slate-400">
+						{quotaStore.quotaBytes < 0 ? '∞' : `${quotaBarPercent}%`}
+					</span>
+				</div>
+				<div class="h-2 w-full overflow-hidden rounded-full bg-[#0b101b]">
+					{#if quotaBarPercent > 0}
+						<div
+							class="h-full rounded-full transition-all duration-500 {quotaBarPercent > 85
+								? 'bg-rose-500'
+								: quotaBarPercent > 65
+									? 'bg-amber-500'
+									: 'bg-accent-500'}"
+							style="width: {quotaBarPercent}%"
+						></div>
+					{/if}
+				</div>
+				<p class="mt-2 truncate text-[11px] text-slate-400">
+					<strong class="text-slate-200">{formatBytes(quotaStore.usedBytes)}</strong> de
+					{formatBytes(quotaStore.quotaBytes)}
+				</p>
+			{:else}
+				<div class="flex items-center gap-2 text-[11px] text-slate-400">
+					<Database class="h-3.5 w-3.5 shrink-0 text-slate-500" />
+					<span>Cota gerenciada por Workspace</span>
+				</div>
+			{/if}
 		</div>
 
 		<!-- User Footer -->
-		<div class="border-t border-[#1a253a] p-3">
+		<div class="border-t border-[#1a253a] p-3 pb-safe">
 			<div class="flex items-center justify-between gap-2 rounded-xl bg-[#131c2e] p-2.5">
 				<a
 					href="/profile"
@@ -345,8 +498,9 @@
 				<button
 					type="button"
 					onclick={logout}
-					class="rounded-lg p-1.5 text-slate-400 hover:bg-rose-500/15 hover:text-rose-400"
+					class="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-rose-500/15 hover:text-rose-400"
 					title="Sair"
+					aria-label="Sair"
 				>
 					<LogOut class="h-4 w-4" />
 				</button>
@@ -357,22 +511,36 @@
 	<!-- Main Content -->
 	<div class="flex min-w-0 flex-1 flex-col overflow-hidden">
 		<!-- Mobile Header -->
-		<header class="flex shrink-0 items-center justify-between border-b border-[#1a253a] bg-[#0e1525] px-3.5 py-2.5 lg:hidden">
+		<header class="flex shrink-0 items-center justify-between gap-2 border-b border-[#1a253a] bg-[#0e1525] px-3 py-2.5 lg:hidden">
 			<button
 				type="button"
 				onclick={() => (mobileOpen = true)}
-				class="rounded-lg p-2 text-slate-300 hover:bg-[#19253c]"
+				class="shrink-0 rounded-lg p-2 text-slate-300 hover:bg-[#19253c]"
 				aria-label="Abrir menu"
 			>
 				<Menu class="h-5 w-5" />
 			</button>
-			<a href="/" class="flex items-center gap-2">
-				<div class="flex h-7 w-7 items-center justify-center rounded-lg bg-accent-600">
-					<HardDrive class="h-4 w-4 text-white" />
-				</div>
-				<span class="text-sm font-bold text-white">Lizzart Explorer</span>
-			</a>
-			<a href="/profile" class="h-8 w-8 overflow-hidden rounded-full ring-1 ring-white/10">
+
+			<button
+				type="button"
+				onclick={() => (mobileOpen = true)}
+				class="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1 hover:bg-[#141e33]"
+			>
+				{#if activeWs}
+					<span
+						class="h-2.5 w-2.5 shrink-0 rounded-full"
+						style="background-color: {activeWs.color}"
+					></span>
+					<span class="truncate text-sm font-bold text-white">{activeWs.name}</span>
+				{:else}
+					<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent-600">
+						<HardDrive class="h-3.5 w-3.5 text-white" />
+					</div>
+					<span class="truncate text-sm font-bold text-white">Lizzart Explorer</span>
+				{/if}
+			</button>
+
+			<a href="/profile" class="h-8 w-8 shrink-0 overflow-hidden rounded-full ring-1 ring-white/10">
 				{#if data.user.avatar_url}
 					<img src={data.user.avatar_url} alt={data.user.full_name} class="h-full w-full object-cover" />
 				{:else}
@@ -386,7 +554,7 @@
 			</a>
 		</header>
 
-		<main class="flex min-h-0 flex-1 flex-col overflow-y-auto">
+		<main class="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
 			{@render children()}
 		</main>
 	</div>

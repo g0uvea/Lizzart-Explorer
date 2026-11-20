@@ -3,11 +3,8 @@ import type { RequestHandler } from './$types';
 import type { RowDataPacket } from 'mysql2/promise';
 import crypto from 'node:crypto';
 import { getPool } from '$lib/server/db';
-import {
-	finalizeChunkTempFile,
-	recalculateUserUsedBytes,
-	removeTempFile
-} from '$lib/server/storage';
+import { finalizeChunkTempFile, removeTempFile } from '$lib/server/storage';
+import { recalculateWorkspaceUsedBytes } from '$lib/server/workspaces';
 import { logAudit } from '$lib/server/auth';
 
 export const POST: RequestHandler = async ({ locals, params, getClientAddress }) => {
@@ -25,6 +22,16 @@ export const POST: RequestHandler = async ({ locals, params, getClientAddress })
 
 	const session = rows[0];
 	const totalBytes = Number(session.total_bytes);
+	const confirmedBytes = Number(session.uploaded_bytes);
+
+	if (confirmedBytes !== totalBytes) {
+		return json(
+			{
+				error: `Upload incompleto (${confirmedBytes} de ${totalBytes} bytes confirmados). Retome o envio.`
+			},
+			{ status: 409 }
+		);
+	}
 
 	let finalized;
 	try {
@@ -37,30 +44,40 @@ export const POST: RequestHandler = async ({ locals, params, getClientAddress })
 		await removeTempFile(finalized.diskPath);
 		return json(
 			{
-				error: `Upload incompleto (${finalized.sizeBytes} de ${totalBytes} bytes). Retome o envio.`
+				error: `Tamanho final divergente (${finalized.sizeBytes} de ${totalBytes} bytes). Retome o envio.`
 			},
 			{ status: 409 }
 		);
 	}
 
 	const nodeId = crypto.randomUUID();
-	const ownerId = String(session.owner_id);
+	const workspaceId = String(session.workspace_id);
 	const parentId = session.parent_id ? String(session.parent_id) : null;
 	const fileName = String(session.file_name);
 	const mimeType = String(session.mime_type || 'application/octet-stream');
 
 	await db.query(
-		`INSERT INTO storage_nodes (id, owner_id, parent_id, type, name, mime_type, size_bytes, disk_path, sha256)
-		 VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?)`,
-		[nodeId, ownerId, parentId, fileName, mimeType, finalized.sizeBytes, finalized.diskPath, finalized.sha256]
+		`INSERT INTO storage_nodes (id, workspace_id, created_by, parent_id, type, name, mime_type, size_bytes, disk_path, sha256)
+		 VALUES (?, ?, ?, ?, 'file', ?, ?, ?, ?, ?)`,
+		[
+			nodeId,
+			workspaceId,
+			locals.user.id,
+			parentId,
+			fileName,
+			mimeType,
+			finalized.sizeBytes,
+			finalized.diskPath,
+			finalized.sha256
+		]
 	);
 
-	await db.query("UPDATE upload_sessions SET status = 'completed', uploaded_bytes = ? WHERE id = ?", [
-		finalized.sizeBytes,
-		session.id
-	]);
+	await db.query(
+		"UPDATE upload_sessions SET status = 'completed', uploaded_bytes = ? WHERE id = ?",
+		[finalized.sizeBytes, session.id]
+	);
 
-	const usedBytes = await recalculateUserUsedBytes(ownerId);
+	const usedBytes = await recalculateWorkspaceUsedBytes(workspaceId);
 
 	await logAudit({
 		userId: locals.user.id,
@@ -75,7 +92,8 @@ export const POST: RequestHandler = async ({ locals, params, getClientAddress })
 		{
 			file: {
 				id: nodeId,
-				owner_id: ownerId,
+				workspace_id: workspaceId,
+				created_by: locals.user.id,
 				parent_id: parentId,
 				type: 'file',
 				name: fileName,

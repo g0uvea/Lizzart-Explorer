@@ -122,7 +122,7 @@
 	<title>{server.name} — Painel Minecraft</title>
 </svelte:head>
 
-<div class="mx-auto max-w-7xl p-6 lg:p-8">
+<div class="mx-auto w-full max-w-7xl p-3.5 sm:p-6 lg:p-8">
 	<!-- Top Back & Header -->
 	<div class="mb-6">
 		<a
@@ -233,11 +233,11 @@
 	</div>
 
 	<!-- Tabs -->
-	<div class="mb-5 flex flex-wrap gap-2 border-b border-[#1a253a]">
+	<div class="no-scrollbar mb-5 flex gap-1 overflow-x-auto border-b border-[#1a253a]">
 		<button
 			type="button"
 			onclick={() => (tab = 'console')}
-			class="inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition {tab === 'console'
+			class="inline-flex shrink-0 items-center gap-2 border-b-2 px-3.5 py-2.5 text-xs font-medium transition sm:px-4 sm:py-3 sm:text-sm {tab === 'console'
 				? 'border-emerald-500 text-white'
 				: 'border-transparent text-slate-400 hover:text-slate-200'}"
 		>
@@ -246,29 +246,29 @@
 		<button
 			type="button"
 			onclick={() => (tab = 'players')}
-			class="inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition {tab === 'players'
+			class="inline-flex shrink-0 items-center gap-2 border-b-2 px-3.5 py-2.5 text-xs font-medium transition sm:px-4 sm:py-3 sm:text-sm {tab === 'players'
 				? 'border-emerald-500 text-white'
 				: 'border-transparent text-slate-400 hover:text-slate-200'}"
 		>
-			<Users class="h-4 w-4" /> Jogadores & Whitelist
+			<Users class="h-4 w-4" /> Jogadores
 		</button>
 		<button
 			type="button"
 			onclick={() => (tab = 'properties')}
-			class="inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition {tab === 'properties'
+			class="inline-flex shrink-0 items-center gap-2 border-b-2 px-3.5 py-2.5 text-xs font-medium transition sm:px-4 sm:py-3 sm:text-sm {tab === 'properties'
 				? 'border-emerald-500 text-white'
 				: 'border-transparent text-slate-400 hover:text-slate-200'}"
 		>
-			<SlidersHorizontal class="h-4 w-4" /> Propriedades (server.properties)
+			<SlidersHorizontal class="h-4 w-4" /> Propriedades
 		</button>
 		<button
 			type="button"
 			onclick={() => (tab = 'backups')}
-			class="inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition {tab === 'backups'
+			class="inline-flex shrink-0 items-center gap-2 border-b-2 px-3.5 py-2.5 text-xs font-medium transition sm:px-4 sm:py-3 sm:text-sm {tab === 'backups'
 				? 'border-emerald-500 text-white'
 				: 'border-transparent text-slate-400 hover:text-slate-200'}"
 		>
-			<Archive class="h-4 w-4" /> Backups & Nuvem
+			<Archive class="h-4 w-4" /> Backups
 		</button>
 	</div>
 

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import { themeStore } from '$lib/stores/theme.svelte';
+	import { transferManager } from '$lib/stores/transfers.svelte';
 	import ToastContainer from '$lib/components/ToastContainer.svelte';
 	import TransferQueue from '$lib/components/TransferQueue.svelte';
 
@@ -8,6 +9,12 @@
 
 	$effect(() => {
 		themeStore.init(data.user?.accent_color ?? null, data.user?.layout_density ?? null);
+		if (data.perf) {
+			transferManager.applyClientPerfConfig(data.perf);
+			if (typeof document !== 'undefined') {
+				document.documentElement.dataset.perf = data.perf.mode;
+			}
+		}
 	});
 </script>
 

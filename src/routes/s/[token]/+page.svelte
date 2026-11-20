@@ -82,7 +82,7 @@
 	<title>{share ? share.name : 'Arquivo Compartilhado'} — Lizzart Explorer</title>
 </svelte:head>
 
-<div class="flex min-h-screen flex-col items-center justify-center bg-[#0b101b] px-4 py-10">
+<div class="flex min-h-dvh flex-col items-center justify-center bg-[#0b101b] px-3.5 py-8 sm:px-4 sm:py-10">
 	<a href="/" class="mb-6 flex items-center gap-2.5 text-slate-200 hover:text-white">
 		<div class="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-600">
 			<HardDrive class="h-5 w-5 text-white" />
@@ -90,7 +90,7 @@
 		<span class="text-lg font-bold tracking-tight">Lizzart Explorer</span>
 	</a>
 
-	<div class="w-full max-w-2xl rounded-2xl border border-[#1f2d45] bg-[#131c2e] p-6 shadow-2xl">
+	<div class="w-full max-w-2xl rounded-2xl border border-[#1f2d45] bg-[#131c2e] p-4 shadow-2xl sm:p-6">
 		{#if loading}
 			<div class="py-16 text-center text-sm text-slate-400">Carregando arquivo compartilhado...</div>
 		{:else if errorMsg}

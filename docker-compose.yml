@@ -1,0 +1,25 @@
+services:
+  lizzart-explorer:
+    image: lizzart-explorer:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lizzart-explorer
+    restart: unless-stopped
+    ports:
+      # Exponha localmente ou atrás do seu proxy reverso (Nginx, Caddy, Traefik, Cloudflare Tunnel)
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      # Defina ORIGIN se acessar por domínio externo (ex: https://nuvem.suaempresa.com.br)
+      # ORIGIN: "https://nuvem.suaempresa.com.br"
+      # FORCE_HTTPS: "true"
+      # Perfil inicial: ultra_optimized | optimized | fast | ultra_fast
+      PERFORMANCE_MODE: "optimized"
+    volumes:
+      # Volume único persistente: MariaDB (/data/mariadb), Arquivos (/data/storage) e Chaves/Env (/data/config)
+      - lizzart_data:/data
+    stop_grace_period: 30s
+
+volumes:
+  lizzart_data:

@@ -59,17 +59,35 @@ export function generateTotpCode(secretBase32: string, stepOffset = 0): string {
 	return String(binary % 1_000_000).padStart(6, '0');
 }
 
-export function verifyTotpCode(secretBase32: string, code: string, window = 1): boolean {
+/**
+ * Verifies a 6-digit TOTP code and returns the matched 30s counter step
+ * so callers can enforce single-use replay protection (step > lastUsedStep).
+ */
+export function verifyTotpCodeWithStep(
+	secretBase32: string,
+	code: string,
+	lastUsedStep?: number | null,
+	window = 1
+): { valid: boolean; step: number | null; replayed?: boolean } {
 	const clean = code.replace(/\s+/g, '');
-	if (!/^\d{6}$/.test(clean)) return false;
+	if (!/^\d{6}$/.test(clean)) return { valid: false, step: null };
 
+	const baseStep = Math.floor(Date.now() / 1000 / 30);
 	for (let offset = -window; offset <= window; offset++) {
 		const expected = generateTotpCode(secretBase32, offset);
 		if (crypto.timingSafeEqual(Buffer.from(clean), Buffer.from(expected))) {
-			return true;
+			const matchedStep = baseStep + offset;
+			if (lastUsedStep !== null && lastUsedStep !== undefined && matchedStep <= lastUsedStep) {
+				return { valid: false, step: matchedStep, replayed: true };
+			}
+			return { valid: true, step: matchedStep };
 		}
 	}
-	return false;
+	return { valid: false, step: null };
+}
+
+export function verifyTotpCode(secretBase32: string, code: string, window = 1): boolean {
+	return verifyTotpCodeWithStep(secretBase32, code, null, window).valid;
 }
 
 export function buildOtpAuthUri(username: string, secretBase32: string): string {

@@ -150,9 +150,9 @@
 	}
 </script>
 
-<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-	<div class="w-full max-w-xl overflow-hidden rounded-2xl border border-[#233047] bg-[#131c2e] shadow-2xl">
-		<div class="flex items-center justify-between border-b border-[#1f2d45] px-5 py-4">
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm sm:p-4">
+	<div class="flex max-h-[92dvh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[#233047] bg-[#131c2e] shadow-2xl">
+		<div class="flex items-center justify-between gap-2 border-b border-[#1f2d45] px-4 py-3.5 sm:px-5 sm:py-4">
 			<div class="min-w-0">
 				<h3 class="truncate text-base font-semibold text-white">Compartilhar "{node.name}"</h3>
 				<p class="text-xs text-slate-400">Compartilhe com usuários pelo @usuário ou gere links externos</p>
@@ -192,30 +192,32 @@
 
 		<div class="max-h-[65vh] overflow-y-auto p-5">
 			{#if tab === 'users'}
-				<form onsubmit={grantUser} class="mb-3 flex flex-wrap gap-2">
+				<form onsubmit={grantUser} class="mb-3 flex flex-col gap-2 sm:flex-row">
 					<input
 						type="text"
 						required
 						bind:value={usernameInput}
 						oninput={(e) => searchUsers(e.currentTarget.value)}
 						placeholder="@usuario..."
-						class="min-w-0 flex-1 rounded-xl border border-[#233047] bg-[#0b101b] px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-accent-500"
+						class="w-full min-w-0 rounded-xl border border-[#233047] bg-[#0b101b] px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-accent-500 sm:flex-1"
 					/>
-					<select
-						bind:value={userPerm}
-						class="rounded-xl border border-[#233047] bg-[#0b101b] px-3 py-2 text-sm text-slate-200 outline-none focus:border-accent-500"
-					>
-						<option value="viewer">Leitor</option>
-						<option value="editor">Editor</option>
-					</select>
-					<button
-						type="submit"
-						disabled={addingUser}
-						class="inline-flex items-center gap-1.5 rounded-xl bg-accent-600 px-4 py-2 text-sm font-semibold text-white hover:bg-accent-500 disabled:opacity-50"
-					>
-						<Plus class="h-4 w-4" />
-						Adicionar
-					</button>
+					<div class="flex gap-2">
+						<select
+							bind:value={userPerm}
+							class="flex-1 rounded-xl border border-[#233047] bg-[#0b101b] px-3 py-2 text-sm text-slate-200 outline-none focus:border-accent-500 sm:flex-none"
+						>
+							<option value="viewer">Leitor</option>
+							<option value="editor">Editor</option>
+						</select>
+						<button
+							type="submit"
+							disabled={addingUser}
+							class="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-accent-600 px-4 py-2 text-sm font-semibold text-white hover:bg-accent-500 disabled:opacity-50 sm:flex-none"
+						>
+							<Plus class="h-4 w-4" />
+							Adicionar
+						</button>
+					</div>
 				</form>
 
 				{#if suggestions.length > 0}

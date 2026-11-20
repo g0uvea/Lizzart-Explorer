@@ -92,7 +92,7 @@
 	<title>Servidores Minecraft — Lizzart Explorer</title>
 </svelte:head>
 
-<div class="mx-auto max-w-7xl p-6 lg:p-8">
+<div class="mx-auto w-full max-w-7xl p-3.5 sm:p-6 lg:p-8">
 	<!-- Header -->
 	<div class="mb-6 flex flex-wrap items-center justify-between gap-4">
 		<div>
@@ -159,7 +159,7 @@
 						</div>
 
 						<!-- Connection & specs strip -->
-						<div class="mt-4 grid grid-cols-3 gap-2.5 rounded-xl border border-[#1d2a42] bg-[#0b101b] p-3 text-xs">
+						<div class="mt-4 grid grid-cols-1 gap-2.5 rounded-xl border border-[#1d2a42] bg-[#0b101b] p-3 text-xs sm:grid-cols-3">
 							<div>
 								<span class="block text-[10px] uppercase tracking-wider text-slate-500">Endereço</span>
 								<code class="font-mono font-semibold text-slate-200">:{srv.host_port}</code>

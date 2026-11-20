@@ -3,16 +3,19 @@ import type { RequestHandler } from './$types';
 import type { RowDataPacket } from 'mysql2/promise';
 import crypto from 'node:crypto';
 import { getPool } from '$lib/server/db';
-import { getNodeById } from '$lib/server/permissions';
+import { getEffectivePermission } from '$lib/server/permissions';
 import { generateToken, hashPassword } from '$lib/server/crypto';
 import { logAudit, normalizeUsername } from '$lib/server/auth';
 
 export const GET: RequestHandler = async ({ locals, params }) => {
 	if (!locals.user) return json({ error: 'Não autenticado.' }, { status: 401 });
 
-	const node = await getNodeById(params.id);
-	if (!node || (node.owner_id !== locals.user.id && locals.user.role !== 'admin')) {
-		return json({ error: 'Sem permissão para gerenciar compartilhamentos deste item.' }, { status: 403 });
+	const { node, permission } = await getEffectivePermission(locals.user, params.id);
+	if (!node || permission !== 'owner') {
+		return json(
+			{ error: 'Apenas gestores da workspace podem gerenciar compartilhamentos deste item.' },
+			{ status: 403 }
+		);
 	}
 
 	const db = getPool();
@@ -70,9 +73,12 @@ export const GET: RequestHandler = async ({ locals, params }) => {
 export const POST: RequestHandler = async ({ locals, params, request, getClientAddress }) => {
 	if (!locals.user) return json({ error: 'Não autenticado.' }, { status: 401 });
 
-	const node = await getNodeById(params.id);
-	if (!node || (node.owner_id !== locals.user.id && locals.user.role !== 'admin')) {
-		return json({ error: 'Sem permissão para compartilhar este item.' }, { status: 403 });
+	const { node, permission } = await getEffectivePermission(locals.user, params.id);
+	if (!node || permission !== 'owner') {
+		return json(
+			{ error: 'Apenas gestores da workspace podem compartilhar este item.' },
+			{ status: 403 }
+		);
 	}
 
 	const body = await request.json().catch(() => null);
@@ -84,7 +90,7 @@ export const POST: RequestHandler = async ({ locals, params, request, getClientA
 	if (body.mode === 'user') {
 		const rawUser = String(body.username || '').replace(/^@/, '');
 		const username = normalizeUsername(rawUser);
-		const permission = body.permission === 'editor' ? 'editor' : 'viewer';
+		const perm = body.permission === 'editor' ? 'editor' : 'viewer';
 
 		const [uRows] = await db.query<RowDataPacket[]>(
 			'SELECT id, username FROM users WHERE username = ? AND is_active = 1 LIMIT 1',
@@ -94,8 +100,8 @@ export const POST: RequestHandler = async ({ locals, params, request, getClientA
 			return json({ error: `Usuário @${username || '?'} não encontrado.` }, { status: 404 });
 		}
 		const targetUser = uRows[0];
-		if (String(targetUser.id) === node.owner_id) {
-			return json({ error: 'Você já é o proprietário deste item.' }, { status: 400 });
+		if (String(targetUser.id) === locals.user.id) {
+			return json({ error: 'Você já possui acesso a este item.' }, { status: 400 });
 		}
 
 		const id = crypto.randomUUID();
@@ -103,7 +109,7 @@ export const POST: RequestHandler = async ({ locals, params, request, getClientA
 			`INSERT INTO node_permissions (id, node_id, user_id, granted_by, permission)
 			 VALUES (?, ?, ?, ?, ?)
 			 ON DUPLICATE KEY UPDATE permission = VALUES(permission)`,
-			[id, node.id, targetUser.id, locals.user.id, permission]
+			[id, node.id, targetUser.id, locals.user.id, perm]
 		);
 
 		await logAudit({
@@ -111,7 +117,7 @@ export const POST: RequestHandler = async ({ locals, params, request, getClientA
 			action: 'share.user_grant',
 			targetType: node.type,
 			targetId: node.id,
-			details: `Compartilhado "${node.name}" com @${username} (${permission})`,
+			details: `Compartilhado "${node.name}" com @${username} (${perm})`,
 			ipAddress: ip
 		});
 
@@ -129,7 +135,7 @@ export const POST: RequestHandler = async ({ locals, params, request, getClientA
 			);
 		}
 		const id = crypto.randomUUID();
-		const token = generateToken(18);
+		const token = generateToken(24);
 		const password =
 			typeof body.password === 'string' && body.password.trim() ? body.password.trim() : null;
 		const passwordHash = password ? await hashPassword(password) : null;
@@ -163,8 +169,8 @@ export const POST: RequestHandler = async ({ locals, params, request, getClientA
 export const DELETE: RequestHandler = async ({ locals, params, url, getClientAddress }) => {
 	if (!locals.user) return json({ error: 'Não autenticado.' }, { status: 401 });
 
-	const node = await getNodeById(params.id);
-	if (!node || (node.owner_id !== locals.user.id && locals.user.role !== 'admin')) {
+	const { node, permission } = await getEffectivePermission(locals.user, params.id);
+	if (!node || permission !== 'owner') {
 		return json({ error: 'Sem permissão.' }, { status: 403 });
 	}
 

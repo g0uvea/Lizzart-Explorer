@@ -1,10 +1,11 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { RowDataPacket } from 'mysql2/promise';
+import fsp from 'node:fs/promises';
 import { getPool } from '$lib/server/db';
 import { hashPassword } from '$lib/server/crypto';
-import { deleteDiskBlobIfUnreferenced } from '$lib/server/storage';
-import { logAudit, MIN_USER_QUOTA_GB } from '$lib/server/auth';
+import { resolveDiskPath } from '$lib/server/storage';
+import { invalidateUserAuthCache, logAudit } from '$lib/server/auth';
 
 export const PATCH: RequestHandler = async ({ locals, params, request, getClientAddress }) => {
 	if (!locals.user || locals.user.role !== 'admin') {
@@ -18,7 +19,10 @@ export const PATCH: RequestHandler = async ({ locals, params, request, getClient
 	const targetId = params.id;
 
 	if (targetId === locals.user.id && (body.role === 'user' || body.is_active === false)) {
-		return json({ error: 'Você não pode rebaixar ou suspender sua própria conta.' }, { status: 400 });
+		return json(
+			{ error: 'Você não pode rebaixar ou suspender sua própria conta.' },
+			{ status: 400 }
+		);
 	}
 
 	const updates: string[] = [];
@@ -39,17 +43,9 @@ export const PATCH: RequestHandler = async ({ locals, params, request, getClient
 	if (typeof body.is_active === 'boolean') {
 		updates.push('is_active = ?');
 		values.push(body.is_active ? 1 : 0);
-	}
-	if (body.quota_gb !== undefined) {
-		const gb = Number(body.quota_gb);
-		if (gb >= 0 && gb < MIN_USER_QUOTA_GB) {
-			return json(
-				{ error: `A cota mínima permitida é de ${MIN_USER_QUOTA_GB} GB (ou ilimitada).` },
-				{ status: 400 }
-			);
+		if (body.is_active) {
+			updates.push('failed_login_count = 0, locked_until = NULL');
 		}
-		updates.push('quota_bytes = ?');
-		values.push(gb < 0 ? -1 : Math.round(gb * 1024 * 1024 * 1024));
 	}
 	if (typeof body.new_password === 'string' && body.new_password.length >= 6) {
 		const hash = await hashPassword(body.new_password);
@@ -57,7 +53,7 @@ export const PATCH: RequestHandler = async ({ locals, params, request, getClient
 		values.push(hash);
 	}
 	if (body.reset_2fa === true) {
-		updates.push('totp_enabled = 0, totp_secret = NULL');
+		updates.push('totp_enabled = 0, totp_secret = NULL, totp_last_step = NULL');
 	}
 
 	if (updates.length === 0) {
@@ -67,9 +63,10 @@ export const PATCH: RequestHandler = async ({ locals, params, request, getClient
 	values.push(targetId);
 	await db.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, values);
 
-	if (body.is_active === false) {
+	if (body.is_active === false || (typeof body.new_password === 'string' && body.new_password.length >= 6)) {
 		await db.query('DELETE FROM sessions WHERE user_id = ?', [targetId]);
 	}
+	invalidateUserAuthCache(targetId);
 
 	await logAudit({
 		userId: locals.user.id,
@@ -83,6 +80,10 @@ export const PATCH: RequestHandler = async ({ locals, params, request, getClient
 	return json({ ok: true });
 };
 
+/**
+ * Deletes ONLY the user account, sessions, avatar, and workspace membership links.
+ * ALL workspaces and ALL files/folders remain 100% intact!
+ */
 export const DELETE: RequestHandler = async ({ locals, params, getClientAddress }) => {
 	if (!locals.user || locals.user.role !== 'admin') {
 		return json({ error: 'Acesso negado.' }, { status: 403 });
@@ -93,16 +94,34 @@ export const DELETE: RequestHandler = async ({ locals, params, getClientAddress 
 	}
 
 	const db = getPool();
-	const [fileRows] = await db.query<RowDataPacket[]>(
-		'SELECT disk_path FROM storage_nodes WHERE owner_id = ? AND disk_path IS NOT NULL',
+	const [rows] = await db.query<RowDataPacket[]>(
+		'SELECT username, avatar_path FROM users WHERE id = ? LIMIT 1',
 		[params.id]
 	);
-	const diskPaths = fileRows.map((r) => String(r.disk_path));
+	if (rows.length === 0) {
+		return json({ error: 'Usuário não encontrado.' }, { status: 404 });
+	}
+	const username = String(rows[0].username);
+	const avatarPath = rows[0].avatar_path ? String(rows[0].avatar_path) : null;
 
+	// Clean up incomplete upload temp files belonging to this user (never committed workspace files!)
+	const [tempRows] = await db.query<RowDataPacket[]>(
+		"SELECT temp_path FROM upload_sessions WHERE user_id = ? AND status = 'uploading'",
+		[params.id]
+	);
+	for (const r of tempRows) {
+		if (r.temp_path) {
+			await fsp.unlink(resolveDiskPath(String(r.temp_path))).catch(() => {});
+		}
+	}
+
+	// Deleting the user cascades ONLY sessions, workspace_members, node_permissions(user_id)
+	// Workspaces, storage_nodes, and share_links stay intact (created_by becomes NULL)!
 	await db.query('DELETE FROM users WHERE id = ?', [params.id]);
+	invalidateUserAuthCache(params.id);
 
-	for (const dp of new Set(diskPaths)) {
-		await deleteDiskBlobIfUnreferenced(dp);
+	if (avatarPath) {
+		await fsp.unlink(resolveDiskPath(avatarPath)).catch(() => {});
 	}
 
 	await logAudit({
@@ -110,7 +129,7 @@ export const DELETE: RequestHandler = async ({ locals, params, getClientAddress 
 		action: 'admin.user_delete',
 		targetType: 'user',
 		targetId: params.id,
-		details: `Usuário excluído e ${diskPaths.length} arquivos limpos`,
+		details: `Usuário @${username} excluído — todas as workspaces e arquivos preservados`,
 		ipAddress: getClientAddress()
 	});
 

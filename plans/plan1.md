@@ -1,0 +1,10 @@
+# Vamos lá, vamos começar as exigências de correções.
+
+1° Melhorar segurança de login, usando sessões, JWT, criptografias de ponta.
+2° Melhorar visualização em dispositivos móveis, para nada ficar fora de campo, ou até mesmo, em cima de outros elementos
+3° Melhorar o desempenho, para não consumir todo o hardware existente, mas também não ficar extremamente lento, faça com que seja possível editar pelo painel admin, a forma como quer que a aplicação rode, (extremamente otimizada, otimizada, rápida, extremamente rápida) por favor.
+4° Faça com que seja possível fazer backup do banco de dados
+5° Faça com que seja possível retomar download e upload dos arquivos em caso de queda de energia, queda de rede etc.
+6° Faça com que uploads sejam enviados em blocos de 8MB com o máximo de 20MB, chegando a 20MB somente se a internet da pessoa for realmente absurdamente boa e estável, se for instável e não tão rápida assim, mantenha nos 8MB.
+7° Faça uma imagem docker exportável para que a pessoa possa usar o docker, e exporte a imagem do docker para a pessoa poder usar o MariaDB + Aplicação em uma só imagem, a conexão com o exterior ela faz a parte, mas quero que esses dois estejam entregues de forma consistente e unificadas na imagem de forma segura e estável.
+8° Faça o sistema de workspaces separado dos usuários. Deixe os usuários como objetos separados das workspaces, assim, podemos criar e deletar usuários, mantendo a workspaces com os arquivos e até com multiplos usuários se preciso. Ai a gente move a definição de cotas para dentro das workspaces. Faça com que o admin e qualquer conta venha sem uma conexão com workspace, e que o admin faça essa conexão. Minha ideia é um app seguro, poderoso, rápido e de baixo custo para manter no ar, para empresas de pequeno a médio porte poderem usar, mas também, escalável suficiente para empresas de grande porte que quiserem usar. Ou então, pessoas montando home-nas, entendeu? por isso quero segurança e confiabilidade em manter os arquivos aqui.

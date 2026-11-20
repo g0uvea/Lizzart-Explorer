@@ -4,11 +4,11 @@ import type { RowDataPacket } from 'mysql2/promise';
 import crypto from 'node:crypto';
 import { getPool } from '$lib/server/db';
 import { getEffectivePermission } from '$lib/server/permissions';
+import { deleteDiskBlobIfUnreferenced, saveBufferAsBlob } from '$lib/server/storage';
 import {
-	deleteDiskBlobIfUnreferenced,
-	recalculateUserUsedBytes,
-	saveBufferAsBlob
-} from '$lib/server/storage';
+	getWorkspaceMembership,
+	recalculateWorkspaceUsedBytes
+} from '$lib/server/workspaces';
 import { logAudit } from '$lib/server/auth';
 
 export const POST: RequestHandler = async ({ locals, params, request, getClientAddress }) => {
@@ -22,6 +22,7 @@ export const POST: RequestHandler = async ({ locals, params, request, getClientA
 	const formData = await request.formData().catch(() => null);
 	const file = formData?.get('image');
 	const mode = String(formData?.get('mode') || 'copy'); // 'replace' | 'copy'
+	const reqWsId = formData?.get('workspaceId') ? String(formData.get('workspaceId')) : null;
 
 	if (!(file instanceof File)) {
 		return json({ error: 'Imagem recortada inválida.' }, { status: 400 });
@@ -30,20 +31,33 @@ export const POST: RequestHandler = async ({ locals, params, request, getClientA
 		return json({ error: 'Sem permissão para substituir o arquivo original.' }, { status: 403 });
 	}
 
+	const targetWorkspaceId = mode === 'replace' ? node.workspace_id : reqWsId || node.workspace_id;
+	if (mode === 'copy') {
+		const membership = await getWorkspaceMembership(locals.user.id, targetWorkspaceId);
+		if (!membership || membership.role === 'viewer') {
+			return json(
+				{ error: 'Sem permissão de escrita na workspace para salvar cópia.' },
+				{ status: 403 }
+			);
+		}
+	}
+
 	const buffer = Buffer.from(await file.arrayBuffer());
 	const db = getPool();
 
-	// Quota check
-	const ownerId = mode === 'replace' ? node.owner_id : locals.user.id;
-	const [ownerRows] = await db.query<RowDataPacket[]>(
-		'SELECT quota_bytes, used_bytes FROM users WHERE id = ? LIMIT 1',
-		[ownerId]
+	const [wsRows] = await db.query<RowDataPacket[]>(
+		'SELECT quota_bytes, used_bytes FROM workspaces WHERE id = ? LIMIT 1',
+		[targetWorkspaceId]
 	);
-	const quota = Number(ownerRows[0]?.quota_bytes ?? 0);
-	const used = Number(ownerRows[0]?.used_bytes ?? 0);
-	const delta = mode === 'replace' ? buffer.byteLength - Number(node.size_bytes) : buffer.byteLength;
+	const quota = Number(wsRows[0]?.quota_bytes ?? 0);
+	const used = Number(wsRows[0]?.used_bytes ?? 0);
+	const delta =
+		mode === 'replace' ? buffer.byteLength - Number(node.size_bytes) : buffer.byteLength;
 	if (quota >= 0 && used + delta > quota) {
-		return json({ error: 'Espaço insuficiente na cota para salvar imagem.' }, { status: 413 });
+		return json(
+			{ error: 'Espaço insuficiente na cota da workspace para salvar imagem.' },
+			{ status: 413 }
+		);
 	}
 
 	const { diskPath, sizeBytes, sha256 } = await saveBufferAsBlob(buffer);
@@ -61,7 +75,7 @@ export const POST: RequestHandler = async ({ locals, params, request, getClientA
 		);
 
 		await deleteDiskBlobIfUnreferenced(oldDiskPath);
-		const usedBytes = await recalculateUserUsedBytes(ownerId);
+		const usedBytes = await recalculateWorkspaceUsedBytes(node.workspace_id);
 
 		await logAudit({
 			userId: locals.user.id,
@@ -75,19 +89,18 @@ export const POST: RequestHandler = async ({ locals, params, request, getClientA
 		return json({ id: node.id, name: newName, used_bytes: usedBytes });
 	}
 
-	// Copy mode
 	const newId = crypto.randomUUID();
 	const baseNoExt = node.name.replace(/\.[^.]+$/, '');
 	const copyName = `${baseNoExt} (recortada)${ext}`;
-	const targetParent = permission === 'owner' ? node.parent_id : null;
+	const targetParent = targetWorkspaceId === node.workspace_id ? node.parent_id : null;
 
 	await db.query(
-		`INSERT INTO storage_nodes (id, owner_id, parent_id, type, name, mime_type, size_bytes, disk_path, sha256)
-		 VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?)`,
-		[newId, locals.user.id, targetParent, copyName, outMime, sizeBytes, diskPath, sha256]
+		`INSERT INTO storage_nodes (id, workspace_id, created_by, parent_id, type, name, mime_type, size_bytes, disk_path, sha256)
+		 VALUES (?, ?, ?, ?, 'file', ?, ?, ?, ?, ?)`,
+		[newId, targetWorkspaceId, locals.user.id, targetParent, copyName, outMime, sizeBytes, diskPath, sha256]
 	);
 
-	const usedBytes = await recalculateUserUsedBytes(locals.user.id);
+	const usedBytes = await recalculateWorkspaceUsedBytes(targetWorkspaceId);
 
 	await logAudit({
 		userId: locals.user.id,

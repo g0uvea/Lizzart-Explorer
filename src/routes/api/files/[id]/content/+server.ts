@@ -18,6 +18,7 @@ export const HEAD: RequestHandler = async ({ locals, params }) => {
 				'Content-Type': node.mime_type || 'application/octet-stream',
 				'Content-Length': String(stat.size),
 				'Accept-Ranges': 'bytes',
+				'X-File-Size': String(stat.size),
 				...(node.sha256 ? { ETag: `"${node.sha256}"` } : {})
 			}
 		});
@@ -51,7 +52,14 @@ export const GET: RequestHandler = async ({ locals, params, url, request, getCli
 		? `attachment; filename*=UTF-8''${encodedName}`
 		: `inline; filename*=UTF-8''${encodedName}`;
 
-	const rangeHeader = request.headers.get('range');
+	const etag = node.sha256 ? `"${node.sha256}"` : null;
+	const ifRange = request.headers.get('if-range');
+	let rangeHeader = request.headers.get('range');
+
+	// Honor RFC 9110 If-Range: if client resumes with stale ETag, send full 200 instead of mismatched 206
+	if (ifRange && etag && ifRange.trim() !== etag) {
+		rangeHeader = null;
+	}
 
 	if (download && (!rangeHeader || rangeHeader.startsWith('bytes=0-'))) {
 		await logAudit({
@@ -69,7 +77,7 @@ export const GET: RequestHandler = async ({ locals, params, url, request, getCli
 		'Accept-Ranges': 'bytes',
 		'Content-Disposition': disposition,
 		'X-File-Size': String(fileSize),
-		...(node.sha256 ? { ETag: `"${node.sha256}"` } : {})
+		...(etag ? { ETag: etag } : {})
 	};
 
 	if (rangeHeader && fileSize > 0) {
@@ -91,6 +99,10 @@ export const GET: RequestHandler = async ({ locals, params, url, request, getCli
 					}
 				});
 			}
+			return new Response('Range Not Satisfiable', {
+				status: 416,
+				headers: { 'Content-Range': `bytes */${fileSize}` }
+			});
 		}
 	}
 

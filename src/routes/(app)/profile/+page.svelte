@@ -3,15 +3,16 @@
 	import { invalidateAll } from '$app/navigation';
 	import { toast } from '$lib/stores/toast.svelte';
 	import { themeStore } from '$lib/stores/theme.svelte';
+	import { workspaceStore } from '$lib/stores/workspace.svelte';
 	import { ACCENT_PRESETS } from '$lib/theme';
 	import type { LayoutDensity, SortBy, SortDir, ViewMode } from '$lib/types';
-	import { formatBytes, formatDate, getInitials } from '$lib/utils';
+	import { formatDate, getInitials } from '$lib/utils';
 	import {
 		User,
 		Lock,
 		Save,
 		ShieldCheck,
-		HardDrive,
+		Layers,
 		Camera,
 		Trash2,
 		Palette,
@@ -55,11 +56,13 @@
 	let totpDisablePass = $state('');
 	let totpBusy = $state(false);
 
-	// Active JWT/Refresh sessions
+	// Active EdDSA JWT / Refresh Rotation sessions
 	interface SessionItem {
 		id: string;
 		ip_address: string;
+		device_label: string;
 		user_agent: string;
+		rotation_count: number;
 		last_used_at: string;
 		created_at: string;
 		expires_at: string;
@@ -387,12 +390,14 @@
 
 			<div class="rounded-xl border border-[#233047] bg-[#0b101b] px-4 py-2.5 sm:text-right">
 				<p class="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-slate-500 sm:justify-end">
-					<HardDrive class="h-3.5 w-3.5 text-accent-400" />
-					Cota Utilizada
+					<Layers class="h-3.5 w-3.5 text-accent-400" />
+					Workspaces Conectadas
 				</p>
 				<p class="mt-0.5 font-mono text-sm font-semibold text-white">
-					{formatBytes(data.user.used_bytes)}
-					<span class="text-slate-500">/ {formatBytes(data.user.quota_bytes)}</span>
+					{workspaceStore.workspaces.length}
+					<span class="text-xs font-normal text-slate-400">
+						{workspaceStore.workspaces.length === 1 ? 'workspace' : 'workspaces'}
+					</span>
 				</p>
 			</div>
 		</div>
@@ -489,12 +494,12 @@
 					</div>
 					<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 						<div>
-							<label for="npw" class="mb-1 block text-xs text-slate-400">Nova senha</label>
-							<input id="npw" type="password" required minlength={6} bind:value={newPassword} class="w-full rounded-xl border border-[#233047] bg-[#0b101b] px-3.5 py-2 text-sm text-white outline-none focus:border-accent-500" />
+							<label for="npw" class="mb-1 block text-xs text-slate-400">Nova senha (mín. 8)</label>
+							<input id="npw" type="password" required minlength={8} bind:value={newPassword} class="w-full rounded-xl border border-[#233047] bg-[#0b101b] px-3.5 py-2 text-sm text-white outline-none focus:border-accent-500" />
 						</div>
 						<div>
 							<label for="rpw" class="mb-1 block text-xs text-slate-400">Confirmar senha</label>
-							<input id="rpw" type="password" required minlength={6} bind:value={confirmPassword} class="w-full rounded-xl border border-[#233047] bg-[#0b101b] px-3.5 py-2 text-sm text-white outline-none focus:border-accent-500" />
+							<input id="rpw" type="password" required minlength={8} bind:value={confirmPassword} class="w-full rounded-xl border border-[#233047] bg-[#0b101b] px-3.5 py-2 text-sm text-white outline-none focus:border-accent-500" />
 						</div>
 					</div>
 
@@ -548,8 +553,8 @@
 						<div class="space-y-4">
 							<div class="flex flex-col items-center gap-3 rounded-xl border border-[#233047] bg-[#0b101b] p-4 text-center">
 								<img src={totpSetup.qrDataUrl} alt="QR Code 2FA" class="h-44 w-44 rounded-lg bg-white p-1.5" />
-								<div class="flex items-center gap-2">
-									<code class="select-text rounded bg-[#131c2e] px-2.5 py-1 font-mono text-xs text-accent-300">
+								<div class="flex max-w-full flex-wrap items-center justify-center gap-2">
+									<code class="select-text break-all rounded bg-[#131c2e] px-2.5 py-1 font-mono text-xs text-accent-300">
 										{totpSetup.secret}
 									</code>
 									<button
@@ -558,7 +563,7 @@
 											navigator.clipboard.writeText(totpSetup!.secret);
 											toast.success('Chave copiada!');
 										}}
-										class="rounded-lg bg-[#19253c] p-1.5 text-slate-300 hover:text-white"
+										class="shrink-0 rounded-lg bg-[#19253c] p-1.5 text-slate-300 hover:text-white"
 										title="Copiar chave secreta"
 									>
 										<Copy class="h-3.5 w-3.5" />
@@ -569,7 +574,7 @@
 								</p>
 							</div>
 
-							<form onsubmit={confirm2fa} class="flex flex-wrap gap-2">
+							<form onsubmit={confirm2fa} class="flex flex-col gap-2 sm:flex-row">
 								<input
 									type="text"
 									inputmode="numeric"
@@ -577,22 +582,24 @@
 									required
 									bind:value={totpCode}
 									placeholder="000000"
-									class="w-36 rounded-xl border border-[#233047] bg-[#0b101b] px-3 py-2 text-center font-mono text-base tracking-widest text-white outline-none focus:border-accent-500"
+									class="w-full rounded-xl border border-[#233047] bg-[#0b101b] px-3 py-2 text-center font-mono text-base tracking-widest text-white outline-none focus:border-accent-500 sm:w-36"
 								/>
-								<button
-									type="submit"
-									disabled={totpBusy}
-									class="flex-1 rounded-xl bg-accent-600 px-4 py-2 text-xs font-semibold text-white hover:bg-accent-500 disabled:opacity-50"
-								>
-									Confirmar e Ativar
-								</button>
-								<button
-									type="button"
-									onclick={() => (totpSetup = null)}
-									class="rounded-xl border border-[#233047] px-3 py-2 text-xs text-slate-400 hover:text-white"
-								>
-									Cancelar
-								</button>
+								<div class="flex flex-1 gap-2">
+									<button
+										type="submit"
+										disabled={totpBusy}
+										class="flex-1 rounded-xl bg-accent-600 px-4 py-2 text-xs font-semibold text-white hover:bg-accent-500 disabled:opacity-50"
+									>
+										Confirmar e Ativar
+									</button>
+									<button
+										type="button"
+										onclick={() => (totpSetup = null)}
+										class="rounded-xl border border-[#233047] px-3 py-2 text-xs text-slate-400 hover:text-white"
+									>
+										Cancelar
+									</button>
+								</div>
 							</form>
 						</div>
 					{:else}
@@ -613,15 +620,15 @@
 			</div>
 		</div>
 
-		<!-- Active JWT & Refresh Sessions -->
-		<div class="mt-6 rounded-2xl border border-[#1f2d45] bg-[#131c2e] p-5 sm:p-6">
+		<!-- Active EdDSA JWT & Refresh Rotation Sessions -->
+		<div class="mt-6 rounded-2xl border border-[#1f2d45] bg-[#131c2e] p-4 sm:p-6">
 			<div class="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[#1f2d45] pb-3.5">
-				<div class="flex items-center gap-2">
-					<MonitorSmartphone class="h-4 w-4 text-accent-400" />
-					<div>
-						<h3 class="text-sm font-semibold text-white">Sessões Ativas (JWT + Refresh Rotation)</h3>
+				<div class="flex min-w-0 items-center gap-2.5">
+					<MonitorSmartphone class="h-4 w-4 shrink-0 text-accent-400" />
+					<div class="min-w-0">
+						<h3 class="text-sm font-semibold text-white">Sessões Ativas (EdDSA Ed25519 + Refresh Rotation)</h3>
 						<p class="text-xs text-slate-400">
-							Tokens JWT HS256 (15 min) com rotação de refresh token em hash SHA-256 no MariaDB.
+							Tokens assimétricos Ed25519 (15 min), refresh HMAC-SHA512 com detecção de reuso, 2FA criptografado em AES-256-GCM e Argon2id.
 						</p>
 					</div>
 				</div>
@@ -644,13 +651,19 @@
 			{:else}
 				<div class="space-y-2.5">
 					{#each activeSessions as sess (sess.id)}
-						<div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#1f2d45] bg-[#0e1525] px-4 py-3 text-xs">
+						<div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#1f2d45] bg-[#0e1525] px-3.5 py-3 text-xs sm:px-4">
 							<div class="min-w-0 flex-1">
 								<div class="flex flex-wrap items-center gap-2">
-									<span class="font-mono font-semibold text-slate-200">{sess.ip_address}</span>
+									<span class="font-semibold text-white">{sess.device_label || 'Dispositivo'}</span>
+									<span class="font-mono text-[11px] text-slate-400">{sess.ip_address}</span>
 									{#if sess.is_current}
 										<span class="rounded-full bg-accent-500/20 px-2 py-0.5 text-[10px] font-semibold text-accent-300">
 											Dispositivo atual
+										</span>
+									{/if}
+									{#if sess.rotation_count > 0}
+										<span class="rounded bg-[#1a263e] px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+											{sess.rotation_count}x rotação
 										</span>
 									{/if}
 								</div>
@@ -658,14 +671,14 @@
 									{sess.user_agent}
 								</p>
 								<p class="mt-0.5 text-[10px] text-slate-500">
-									Iniciada em {formatDate(sess.created_at)} • Última atividade: {formatDate(sess.last_used_at)}
+									Iniciada em {formatDate(sess.created_at)} • Atividade: {formatDate(sess.last_used_at)}
 								</p>
 							</div>
 							{#if !sess.is_current}
 								<button
 									type="button"
 									onclick={() => revokeSession(sess.id)}
-									class="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-[11px] font-medium text-rose-300 hover:bg-rose-500/20"
+									class="shrink-0 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-[11px] font-medium text-rose-300 hover:bg-rose-500/20"
 								>
 									Revogar
 								</button>

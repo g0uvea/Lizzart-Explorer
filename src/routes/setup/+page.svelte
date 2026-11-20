@@ -52,8 +52,8 @@
 	<title>Configuração Inicial — Lizzart Explorer</title>
 </svelte:head>
 
-<div class="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0b101b] px-4 py-12">
-	<div class="pointer-events-none absolute -top-40 left-1/2 h-96 w-[42rem] -translate-x-1/2 rounded-full bg-accent-500/15 blur-3xl"></div>
+<div class="relative flex min-h-dvh items-center justify-center overflow-hidden bg-[#0b101b] px-4 py-10">
+	<div class="pointer-events-none absolute -top-40 left-1/2 h-96 w-full max-w-[42rem] -translate-x-1/2 rounded-full bg-accent-500/15 blur-3xl"></div>
 
 	<div class="relative w-full max-w-lg">
 		<div class="mb-8 flex flex-col items-center text-center">
@@ -69,7 +69,7 @@
 			</p>
 		</div>
 
-		<div class="rounded-2xl border border-[#1f2d45] bg-[#131c2e]/95 p-7 shadow-2xl backdrop-blur-xl">
+		<div class="rounded-2xl border border-[#1f2d45] bg-[#131c2e]/95 p-5 shadow-2xl backdrop-blur-xl sm:p-7">
 			{#if errorMsg}
 				<div class="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
 					{errorMsg}
@@ -144,9 +144,9 @@
 								id="s-pw"
 								type="password"
 								required
-								minlength={6}
+								minlength={8}
 								bind:value={password}
-								placeholder="Mín. 6 caracteres"
+								placeholder="Mín. 8 caracteres"
 								class="w-full rounded-xl border border-[#233047] bg-[#0b101b] py-2.5 pr-4 pl-10 text-sm text-white placeholder-slate-500 outline-none focus:border-accent-500"
 							/>
 						</div>
@@ -159,7 +159,7 @@
 							id="s-pw2"
 							type="password"
 							required
-							minlength={6}
+							minlength={8}
 							bind:value={confirmPassword}
 							placeholder="Repita a senha"
 							class="w-full rounded-xl border border-[#233047] bg-[#0b101b] px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-accent-500"
@@ -169,7 +169,7 @@
 
 				<div class="flex items-center gap-2 rounded-xl border border-accent-500/20 bg-accent-500/10 px-3.5 py-2.5 text-xs text-accent-200">
 					<ShieldCheck class="h-4 w-4 shrink-0 text-accent-400" />
-					<span>Esta conta terá privilégios totais de Administrador e cota ilimitada.</span>
+					<span>Conta Administradora inicial (sem workspace vinculada). Crie e conecte workspaces pelo Painel Admin.</span>
 				</div>
 
 				<button

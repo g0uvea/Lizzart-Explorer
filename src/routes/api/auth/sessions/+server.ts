@@ -2,14 +2,14 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { RowDataPacket } from 'mysql2/promise';
 import { getPool } from '$lib/server/db';
-import { logAudit } from '$lib/server/auth';
+import { invalidateUserAuthCache, logAudit } from '$lib/server/auth';
 
 export const GET: RequestHandler = async ({ locals }) => {
 	if (!locals.user) return json({ error: 'Não autenticado.' }, { status: 401 });
 
 	const db = getPool();
 	const [rows] = await db.query<RowDataPacket[]>(
-		`SELECT id, ip_address, user_agent, last_used_at, created_at, expires_at
+		`SELECT id, ip_address, user_agent, device_label, rotation_count, last_used_at, created_at, expires_at
 		 FROM sessions
 		 WHERE user_id = ? AND expires_at > CURRENT_TIMESTAMP
 		 ORDER BY last_used_at DESC`,
@@ -20,7 +20,9 @@ export const GET: RequestHandler = async ({ locals }) => {
 		sessions: rows.map((r) => ({
 			id: String(r.id),
 			ip_address: r.ip_address ? String(r.ip_address) : '—',
+			device_label: r.device_label ? String(r.device_label) : 'Dispositivo',
 			user_agent: r.user_agent ? String(r.user_agent) : 'Navegador desconhecido',
+			rotation_count: Number(r.rotation_count ?? 0),
 			last_used_at:
 				r.last_used_at instanceof Date ? r.last_used_at.toISOString() : String(r.last_used_at),
 			created_at:
@@ -44,6 +46,7 @@ export const DELETE: RequestHandler = async ({ locals, url, getClientAddress }) 
 			locals.user.id,
 			locals.sessionId
 		]);
+		invalidateUserAuthCache(locals.user.id);
 		await logAudit({
 			userId: locals.user.id,
 			action: 'auth.sessions_revoke_others',
@@ -60,6 +63,7 @@ export const DELETE: RequestHandler = async ({ locals, url, getClientAddress }) 
 			sessionId,
 			locals.user.id
 		]);
+		invalidateUserAuthCache(locals.user.id);
 		await logAudit({
 			userId: locals.user.id,
 			action: 'auth.session_revoke',

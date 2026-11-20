@@ -4,7 +4,7 @@ import { clearSessionCookie, invalidateSession, logAudit } from '$lib/server/aut
 
 export const POST: RequestHandler = async ({ locals, cookies, getClientAddress }) => {
 	if (locals.sessionId) {
-		await invalidateSession(locals.sessionId);
+		await invalidateSession(locals.sessionId, locals.user?.id);
 	}
 	if (locals.user) {
 		await logAudit({

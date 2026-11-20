@@ -4,6 +4,7 @@ import type { RowDataPacket } from 'mysql2/promise';
 import fsp from 'node:fs/promises';
 import { getPool } from '$lib/server/db';
 import { resolveDiskPath, saveAvatarFile } from '$lib/server/storage';
+import { invalidateUserAuthCache } from '$lib/server/auth';
 
 const MAX_AVATAR_BYTES = 8 * 1024 * 1024;
 
@@ -31,6 +32,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 
 	const relPath = await saveAvatarFile(locals.user.id, file);
 	await db.query('UPDATE users SET avatar_path = ? WHERE id = ?', [relPath, locals.user.id]);
+	invalidateUserAuthCache(locals.user.id);
 
 	if (prevPath) {
 		await fsp.unlink(resolveDiskPath(prevPath)).catch(() => {});
@@ -52,6 +54,7 @@ export const DELETE: RequestHandler = async ({ locals }) => {
 	const prevPath = prevRows[0]?.avatar_path ? String(prevRows[0].avatar_path) : null;
 
 	await db.query('UPDATE users SET avatar_path = NULL WHERE id = ?', [locals.user.id]);
+	invalidateUserAuthCache(locals.user.id);
 	if (prevPath) {
 		await fsp.unlink(resolveDiskPath(prevPath)).catch(() => {});
 	}

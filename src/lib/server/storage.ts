@@ -4,6 +4,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { RowDataPacket } from 'mysql2/promise';
 import { getPool } from '$lib/server/db';
+import { getPerformanceConfig, withIoSlot } from '$lib/server/performance';
+
+export const MIN_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024; // 8 MB
+export const MAX_UPLOAD_CHUNK_BYTES = 20 * 1024 * 1024; // 20 MB hard cap
 
 let storageRootRaw = process.env.STORAGE_ROOT || './storage';
 let storageRootResolved = path.resolve(process.cwd(), storageRootRaw);
@@ -32,7 +36,6 @@ export async function inspectStorageDirectory(candidatePath: string): Promise<{
 	const resolved = path.resolve(process.cwd(), candidatePath.trim() || './storage');
 	try {
 		await fsp.mkdir(resolved, { recursive: true });
-		// Verify write permission with a temporary probe file
 		const probe = path.join(resolved, `.lizzart-probe-${Date.now()}`);
 		await fsp.writeFile(probe, 'ok');
 		await fsp.unlink(probe);
@@ -49,7 +52,8 @@ export async function inspectStorageDirectory(candidatePath: string): Promise<{
 		return {
 			ok: false,
 			resolvedPath: resolved,
-			error: err instanceof Error ? err.message : 'Diretório inacessível ou sem permissão de escrita.'
+			error:
+				err instanceof Error ? err.message : 'Diretório inacessível ou sem permissão de escrita.'
 		};
 	}
 }
@@ -76,10 +80,13 @@ async function copyDirRecursive(src: string, dest: string): Promise<number> {
 	return movedCount;
 }
 
-export async function migrateStorageDirectory(oldResolved: string, newResolved: string): Promise<number> {
+export async function migrateStorageDirectory(
+	oldResolved: string,
+	newResolved: string
+): Promise<number> {
 	if (path.resolve(oldResolved) === path.resolve(newResolved)) return 0;
 	let total = 0;
-	for (const sub of ['blobs', 'avatars']) {
+	for (const sub of ['blobs', 'avatars', 'backups']) {
 		const src = path.join(oldResolved, sub);
 		const dst = path.join(newResolved, sub);
 		total += await copyDirRecursive(src, dst);
@@ -91,7 +98,8 @@ export async function ensureStorageDir(): Promise<void> {
 	await Promise.all([
 		fsp.mkdir(path.join(storageRootResolved, 'blobs'), { recursive: true }),
 		fsp.mkdir(path.join(storageRootResolved, 'chunks'), { recursive: true }),
-		fsp.mkdir(path.join(storageRootResolved, 'avatars'), { recursive: true })
+		fsp.mkdir(path.join(storageRootResolved, 'avatars'), { recursive: true }),
+		fsp.mkdir(path.join(storageRootResolved, 'backups'), { recursive: true })
 	]);
 }
 
@@ -117,21 +125,91 @@ export async function createChunkTempFile(uploadId: string): Promise<string> {
 	return relPath;
 }
 
-export async function writeChunkAtOffset(
-	tempRelPath: string,
-	offset: number,
-	data: Uint8Array
-): Promise<number> {
-	await ensureStorageDir();
+/**
+ * Truncates unconfirmed trailing bytes on a .part file after an abrupt power outage or crash
+ * so resuming always starts cleanly from the exact durable byte boundary.
+ */
+export async function truncateTempFile(tempRelPath: string, safeSize: number): Promise<void> {
 	const absPath = resolveDiskPath(tempRelPath);
-	const handle = await fsp.open(absPath, 'r+').catch(async () => fsp.open(absPath, 'w+'));
+	const handle = await fsp.open(absPath, 'r+');
 	try {
-		await handle.write(data, 0, data.byteLength, offset);
+		await handle.truncate(safeSize);
+		await handle.datasync();
 	} finally {
 		await handle.close();
 	}
-	const stat = await fsp.stat(absPath);
-	return stat.size;
+}
+
+/**
+ * Streams an incoming chunk directly to disk at `offset` without loading the entire 20 MB chunk
+ * into server RAM, optionally verifies SHA-256, and flushes with `datasync()` for power-loss durability.
+ */
+export async function writeChunkStreamAtOffset(params: {
+	tempRelPath: string;
+	offset: number;
+	totalBytes: number;
+	body: ReadableStream<Uint8Array>;
+	maxChunkBytes?: number;
+	expectedSha256?: string | null;
+}): Promise<{ bytesWritten: number; sha256: string }> {
+	const maxAllowed = params.maxChunkBytes ?? MAX_UPLOAD_CHUNK_BYTES;
+
+	return withIoSlot(async () => {
+		await ensureStorageDir();
+		const absPath = resolveDiskPath(params.tempRelPath);
+		const handle = await fsp.open(absPath, 'r+').catch(async () => fsp.open(absPath, 'w+'));
+
+		let written = 0;
+		const hash = crypto.createHash('sha256');
+		const reader = params.body.getReader();
+
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				if (!value || value.byteLength === 0) continue;
+
+				if (written + value.byteLength > maxAllowed) {
+					throw Object.assign(
+						new Error(`Chunk excede o limite máximo de ${Math.round(maxAllowed / (1024 * 1024))} MB.`),
+						{ statusCode: 413 }
+					);
+				}
+				if (params.offset + written + value.byteLength > params.totalBytes) {
+					throw Object.assign(
+						new Error('Chunk ultrapassa o tamanho total declarado do arquivo.'),
+						{ statusCode: 400 }
+					);
+				}
+
+				hash.update(value);
+				await handle.write(value, 0, value.byteLength, params.offset + written);
+				written += value.byteLength;
+			}
+
+			const computedSha = hash.digest('hex');
+			if (
+				params.expectedSha256 &&
+				params.expectedSha256.toLowerCase() !== computedSha.toLowerCase()
+			) {
+				// Roll back unverified trailing bytes if this chunk extended the file
+				await handle.truncate(params.offset).catch(() => {});
+				throw Object.assign(
+					new Error('Falha de integridade SHA-256 no bloco recebido. Reenvie o chunk.'),
+					{ statusCode: 422 }
+				);
+			}
+
+			// Flush written bytes to persistent storage so power outages never corrupt confirmed offsets
+			await handle.datasync();
+			return { bytesWritten: written, sha256: computedSha };
+		} catch (err) {
+			reader.cancel().catch(() => {});
+			throw err;
+		} finally {
+			await handle.close();
+		}
+	});
 }
 
 export async function finalizeChunkTempFile(tempRelPath: string): Promise<{
@@ -139,33 +217,36 @@ export async function finalizeChunkTempFile(tempRelPath: string): Promise<{
 	sizeBytes: number;
 	sha256: string;
 }> {
-	await ensureStorageDir();
-	const absTemp = resolveDiskPath(tempRelPath);
-	const stat = await fsp.stat(absTemp);
+	return withIoSlot(async () => {
+		await ensureStorageDir();
+		const absTemp = resolveDiskPath(tempRelPath);
+		const stat = await fsp.stat(absTemp);
+		const hwm = getPerformanceConfig().streamHighWaterMark;
 
-	const sha256 = await new Promise<string>((resolve, reject) => {
-		const hash = crypto.createHash('sha256');
-		const rs = fs.createReadStream(absTemp);
-		rs.on('data', (chunk) => hash.update(chunk));
-		rs.on('end', () => resolve(hash.digest('hex')));
-		rs.on('error', reject);
+		const sha256 = await new Promise<string>((resolve, reject) => {
+			const hash = crypto.createHash('sha256');
+			const rs = fs.createReadStream(absTemp, { highWaterMark: hwm });
+			rs.on('data', (chunk) => hash.update(chunk));
+			rs.on('end', () => resolve(hash.digest('hex')));
+			rs.on('error', reject);
+		});
+
+		const id = crypto.randomUUID();
+		const prefix = id.slice(0, 2);
+		const relDir = path.join('blobs', prefix);
+		const absDir = path.join(storageRootResolved, relDir);
+		await fsp.mkdir(absDir, { recursive: true });
+
+		const relPath = path.join(relDir, id).replace(/\\/g, '/');
+		const absFinal = resolveDiskPath(relPath);
+		await fsp.rename(absTemp, absFinal);
+
+		return {
+			diskPath: relPath,
+			sizeBytes: stat.size,
+			sha256
+		};
 	});
-
-	const id = crypto.randomUUID();
-	const prefix = id.slice(0, 2);
-	const relDir = path.join('blobs', prefix);
-	const absDir = path.join(storageRootResolved, relDir);
-	await fsp.mkdir(absDir, { recursive: true });
-
-	const relPath = path.join(relDir, id).replace(/\\/g, '/');
-	const absFinal = resolveDiskPath(relPath);
-	await fsp.rename(absTemp, absFinal);
-
-	return {
-		diskPath: relPath,
-		sizeBytes: stat.size,
-		sha256
-	};
 }
 
 export async function removeTempFile(tempRelPath: string | null): Promise<void> {
@@ -182,23 +263,25 @@ export async function saveBufferAsBlob(buffer: Buffer): Promise<{
 	sizeBytes: number;
 	sha256: string;
 }> {
-	await ensureStorageDir();
-	const id = crypto.randomUUID();
-	const prefix = id.slice(0, 2);
-	const relDir = path.join('blobs', prefix);
-	const absDir = path.join(storageRootResolved, relDir);
-	await fsp.mkdir(absDir, { recursive: true });
+	return withIoSlot(async () => {
+		await ensureStorageDir();
+		const id = crypto.randomUUID();
+		const prefix = id.slice(0, 2);
+		const relDir = path.join('blobs', prefix);
+		const absDir = path.join(storageRootResolved, relDir);
+		await fsp.mkdir(absDir, { recursive: true });
 
-	const relPath = path.join(relDir, id).replace(/\\/g, '/');
-	const absPath = resolveDiskPath(relPath);
-	await fsp.writeFile(absPath, buffer);
-	const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+		const relPath = path.join(relDir, id).replace(/\\/g, '/');
+		const absPath = resolveDiskPath(relPath);
+		await fsp.writeFile(absPath, buffer);
+		const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
 
-	return {
-		diskPath: relPath,
-		sizeBytes: buffer.byteLength,
-		sha256
-	};
+		return {
+			diskPath: relPath,
+			sizeBytes: buffer.byteLength,
+			sha256
+		};
+	});
 }
 
 export async function saveAvatarFile(userId: string, file: File): Promise<string> {
@@ -228,19 +311,6 @@ export async function deleteDiskBlobIfUnreferenced(diskPath: string | null): Pro
 			// File already removed or missing
 		}
 	}
-}
-
-export async function recalculateUserUsedBytes(userId: string): Promise<number> {
-	const db = getPool();
-	const [rows] = await db.query<RowDataPacket[]>(
-		`SELECT COALESCE(SUM(size_bytes), 0) AS total
-		 FROM storage_nodes
-		 WHERE owner_id = ? AND type = 'file'`,
-		[userId]
-	);
-	const total = Number(rows[0]?.total ?? 0);
-	await db.query('UPDATE users SET used_bytes = ? WHERE id = ?', [total, userId]);
-	return total;
 }
 
 export function detectMimeType(fileName: string, providedMime?: string): string {
@@ -298,9 +368,17 @@ export function detectMimeType(fileName: string, providedMime?: string): string 
 	return map[ext] || providedMime || 'application/octet-stream';
 }
 
-export function createFileReadStream(relativePath: string, start?: number, end?: number): fs.ReadStream {
+export function createFileReadStream(
+	relativePath: string,
+	start?: number,
+	end?: number
+): fs.ReadStream {
 	const absPath = resolveDiskPath(relativePath);
-	return fs.createReadStream(absPath, start !== undefined ? { start, end } : undefined);
+	const highWaterMark = getPerformanceConfig().streamHighWaterMark;
+	return fs.createReadStream(
+		absPath,
+		start !== undefined ? { start, end, highWaterMark } : { highWaterMark }
+	);
 }
 
 export async function getFileStat(relativePath: string) {

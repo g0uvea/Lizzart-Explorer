@@ -4,12 +4,7 @@ import type { RowDataPacket } from 'mysql2/promise';
 import crypto from 'node:crypto';
 import { getPool } from '$lib/server/db';
 import { hashPassword } from '$lib/server/crypto';
-import {
-	isValidUsername,
-	logAudit,
-	MIN_USER_QUOTA_GB,
-	normalizeUsername
-} from '$lib/server/auth';
+import { isValidUsername, logAudit, normalizeUsername } from '$lib/server/auth';
 
 const COLORS = ['#10b981', '#0ea5e9', '#6366f1', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6'];
 
@@ -24,8 +19,6 @@ export const POST: RequestHandler = async ({ locals, request, getClientAddress }
 	const lastName = String(body?.last_name || '').trim();
 	const password = String(body?.password || '');
 	const role = body?.role === 'admin' ? 'admin' : 'user';
-	const unlimited = Boolean(body?.unlimited);
-	const rawQuotaGb = Number(body?.quota_gb ?? MIN_USER_QUOTA_GB);
 
 	if (!isValidUsername(username)) {
 		return json(
@@ -39,14 +32,6 @@ export const POST: RequestHandler = async ({ locals, request, getClientAddress }
 	if (password.length < 6) {
 		return json({ error: 'A senha deve ter pelo menos 6 caracteres.' }, { status: 400 });
 	}
-	if (!unlimited && (Number.isNaN(rawQuotaGb) || rawQuotaGb < MIN_USER_QUOTA_GB)) {
-		return json(
-			{ error: `A cota mínima para novos usuários é de ${MIN_USER_QUOTA_GB} GB.` },
-			{ status: 400 }
-		);
-	}
-
-	const quotaBytes = unlimited ? -1 : Math.round(rawQuotaGb * 1024 * 1024 * 1024);
 
 	const db = getPool();
 	const [existing] = await db.query<RowDataPacket[]>(
@@ -61,10 +46,11 @@ export const POST: RequestHandler = async ({ locals, request, getClientAddress }
 	const hash = await hashPassword(password);
 	const color = COLORS[Math.floor(Math.random() * COLORS.length)];
 
+	// Accounts start decoupled from workspaces — Admin connects them via Workspaces management
 	await db.query(
-		`INSERT INTO users (id, username, first_name, last_name, password_hash, role, quota_bytes, used_bytes, is_active, avatar_color, accent_color, layout_density)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1, ?, '#10b981', 'normal')`,
-		[id, username, firstName, lastName, hash, role, quotaBytes, color]
+		`INSERT INTO users (id, username, first_name, last_name, password_hash, role, is_active, avatar_color, accent_color, layout_density)
+		 VALUES (?, ?, ?, ?, ?, ?, 1, ?, '#10b981', 'normal')`,
+		[id, username, firstName, lastName, hash, role, color]
 	);
 
 	await logAudit({
@@ -72,7 +58,7 @@ export const POST: RequestHandler = async ({ locals, request, getClientAddress }
 		action: 'admin.user_create',
 		targetType: 'user',
 		targetId: id,
-		details: `Usuário criado: @${username} (${role}, cota: ${unlimited ? 'Ilimitada' : `${rawQuotaGb} GB`})`,
+		details: `Usuário criado sem workspace conectada: @${username} (${role})`,
 		ipAddress: getClientAddress()
 	});
 

@@ -133,25 +133,35 @@
 </script>
 
 <div
-	class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+	class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 backdrop-blur-sm sm:p-4"
 	role="dialog"
 	aria-modal="true"
 >
-	<div class="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#233047] bg-[#111929] shadow-2xl">
-		<!-- Header -->
-		<div class="flex flex-wrap items-center justify-between gap-3 border-b border-[#1f2d45] px-5 py-3.5">
-			<div class="min-w-0">
-				<div class="flex items-center gap-2">
-					<h3 class="truncate text-sm font-semibold text-white">{node.name}</h3>
-					<span class="rounded bg-accent-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-300">
-						Original
-					</span>
+	<div class="flex max-h-[94dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#233047] bg-[#111929] shadow-2xl">
+		<!-- Header (mobile-first: title + close always on row 1, action buttons wrap cleanly below) -->
+		<div class="flex flex-col gap-2.5 border-b border-[#1f2d45] px-3.5 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-5 sm:py-3.5">
+			<div class="flex min-w-0 items-start justify-between gap-2 sm:flex-1">
+				<div class="min-w-0 flex-1">
+					<div class="flex items-center gap-2">
+						<h3 class="truncate text-sm font-semibold text-white">{node.name}</h3>
+						<span class="shrink-0 rounded bg-accent-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-300">
+							Original
+						</span>
+					</div>
+					<p class="truncate text-[11px] text-slate-400 sm:text-xs">
+						{formatBytes(node.size_bytes)} • {node.mime_type || 'Arquivo'} • {formatDate(node.updated_at)}
+					</p>
 				</div>
-				<p class="text-xs text-slate-400">
-					{formatBytes(node.size_bytes)} • {node.mime_type || 'Arquivo'} • {formatDate(node.updated_at)}
-				</p>
+				<button
+					type="button"
+					onclick={onClose}
+					class="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-[#1b273d] hover:text-white sm:hidden"
+					aria-label="Fechar"
+				>
+					<X class="h-4 w-4" />
+				</button>
 			</div>
-			<div class="flex flex-wrap items-center gap-2">
+			<div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
 				{#if category === 'image'}
 					<div class="flex items-center rounded-lg border border-[#233047] bg-[#0b101b] p-0.5">
 						<button
@@ -215,7 +225,7 @@
 				<button
 					type="button"
 					onclick={onClose}
-					class="rounded-lg p-1.5 text-slate-400 hover:bg-[#1b273d] hover:text-white"
+					class="hidden rounded-lg p-1.5 text-slate-400 hover:bg-[#1b273d] hover:text-white sm:inline-flex"
 					aria-label="Fechar"
 				>
 					<X class="h-4 w-4" />
@@ -436,7 +446,7 @@
 		</div>
 
 		{#if node.sha256}
-			<div class="border-t border-[#1f2d45] bg-[#0e1525] px-5 py-2 text-[11px] font-mono text-slate-500">
+			<div class="truncate border-t border-[#1f2d45] bg-[#0e1525] px-3.5 py-2 font-mono text-[10px] text-slate-500 sm:px-5 sm:text-[11px]" title="SHA-256: {node.sha256}">
 				SHA-256: {node.sha256}
 			</div>
 		{/if}

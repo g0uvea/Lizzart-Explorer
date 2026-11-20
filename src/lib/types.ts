@@ -1,9 +1,54 @@
 export type UserRole = 'admin' | 'user';
+export type WorkspaceRole = 'manager' | 'editor' | 'viewer';
+export type PerformanceMode = 'ultra_optimized' | 'optimized' | 'fast' | 'ultra_fast';
+export type AutoBackupInterval = 'off' | 'daily' | 'weekly';
 
 export type LayoutDensity = 'normal' | 'compact';
 export type ViewMode = 'grid' | 'list';
 export type SortBy = 'name' | 'date' | 'size';
 export type SortDir = 'asc' | 'desc';
+
+export interface WorkspaceSummary {
+	id: string;
+	name: string;
+	slug: string;
+	description: string | null;
+	color: string;
+	quota_bytes: number;
+	used_bytes: number;
+	is_active: boolean;
+	role: WorkspaceRole;
+}
+
+export interface WorkspaceMemberRecord {
+	id: string;
+	workspace_id: string;
+	user_id: string;
+	username: string;
+	full_name: string;
+	avatar_color: string;
+	avatar_url: string | null;
+	user_role: UserRole;
+	role: WorkspaceRole;
+	created_at: string;
+}
+
+export interface WorkspaceAdminRecord {
+	id: string;
+	name: string;
+	slug: string;
+	description: string | null;
+	color: string;
+	quota_bytes: number;
+	used_bytes: number;
+	is_active: boolean;
+	member_count: number;
+	file_count: number;
+	folder_count: number;
+	created_at: string;
+	updated_at: string;
+	members: WorkspaceMemberRecord[];
+}
 
 export interface SafeUser {
 	id: string;
@@ -12,8 +57,6 @@ export interface SafeUser {
 	last_name: string;
 	full_name: string;
 	role: UserRole;
-	quota_bytes: number;
-	used_bytes: number;
 	is_active: boolean;
 	avatar_color: string;
 	avatar_url: string | null;
@@ -24,15 +67,18 @@ export interface SafeUser {
 	default_sort_dir: SortDir;
 	totp_enabled: boolean;
 	created_at: string;
+	workspaces?: WorkspaceSummary[];
 }
 
 export type NodeType = 'folder' | 'file';
 
 export interface StorageNode {
 	id: string;
-	owner_id: string;
-	owner_name?: string;
-	owner_username?: string;
+	workspace_id: string;
+	workspace_name?: string;
+	created_by: string | null;
+	created_by_name?: string;
+	created_by_username?: string;
 	parent_id: string | null;
 	type: NodeType;
 	name: string;
@@ -94,6 +140,75 @@ export interface AuditLogRecord {
 export interface SystemSettings {
 	default_quota_gb: number;
 	max_upload_mb: number;
+	performance_mode: PerformanceMode;
+	auto_backup_interval: AutoBackupInterval;
+	backup_retention_count: number;
+}
+
+export interface PerformanceClientConfig {
+	mode: PerformanceMode;
+	label: string;
+	maxConcurrentTransfers: number;
+	searchDebounceMs: number;
+	reducedEffects: boolean;
+}
+
+export interface PerformanceProfileInfo {
+	mode: PerformanceMode;
+	label: string;
+	tagline: string;
+	description: string;
+	dbConnectionLimit: number;
+	streamHighWaterMarkKb: number;
+	maxConcurrentIo: number;
+	authCacheTtlSec: number;
+	metadataCacheMaxEntries: number;
+	maxListLimit: number;
+	argon2MemoryMb: number;
+	clientMaxConcurrentTransfers: number;
+	clientSearchDebounceMs: number;
+	clientReducedEffects: boolean;
+}
+
+export interface PerformanceTelemetry {
+	mode: PerformanceMode;
+	rssMb: number;
+	heapUsedMb: number;
+	heapTotalMb: number;
+	cpuCores: number;
+	loadAvg1m: number;
+	uptimeSeconds: number;
+	activeIoSlots: number;
+	maxIoSlots: number;
+	cacheEntries: number;
+	cacheMaxEntries: number;
+	cacheHitRatePct: number;
+	dbConnectionLimit: number;
+}
+
+export interface BackupRecord {
+	id: string;
+	file_name: string;
+	size_bytes: number;
+	sha256: string;
+	method: 'mariadb-dump' | 'sql-native' | 'uploaded';
+	compressed: boolean;
+	created_by_username: string | null;
+	created_at: string;
+	exists_on_disk: boolean;
+}
+
+export interface PendingUploadSession {
+	uploadId: string;
+	workspaceId: string;
+	workspaceName: string;
+	parentId: string | null;
+	fileName: string;
+	mimeType: string;
+	totalBytes: number;
+	uploadedBytes: number;
+	fingerprint: string;
+	updatedAt: string;
 }
 
 export interface McServerRecord {

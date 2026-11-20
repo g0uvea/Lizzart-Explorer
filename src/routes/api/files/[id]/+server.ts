@@ -3,11 +3,8 @@ import type { RequestHandler } from './$types';
 import type { RowDataPacket } from 'mysql2/promise';
 import { getPool } from '$lib/server/db';
 import { collectDescendantNodeIds, getEffectivePermission } from '$lib/server/permissions';
-import {
-	deleteDiskBlobIfUnreferenced,
-	recalculateUserUsedBytes,
-	sanitizeFileName
-} from '$lib/server/storage';
+import { deleteDiskBlobIfUnreferenced, sanitizeFileName } from '$lib/server/storage';
+import { recalculateWorkspaceUsedBytes } from '$lib/server/workspaces';
 import { logAudit } from '$lib/server/auth';
 
 export const GET: RequestHandler = async ({ locals, params }) => {
@@ -21,7 +18,8 @@ export const GET: RequestHandler = async ({ locals, params }) => {
 	return json({
 		node: {
 			id: node.id,
-			owner_id: node.owner_id,
+			workspace_id: node.workspace_id,
+			created_by: node.created_by,
 			parent_id: node.parent_id,
 			type: node.type,
 			name: node.name,
@@ -52,10 +50,10 @@ export const PATCH: RequestHandler = async ({ locals, params, request, getClient
 	const db = getPool();
 	const ip = getClientAddress();
 
-	// Star/unstar (owner only)
+	// Star/unstar (manager or editor)
 	if (typeof body.is_starred === 'boolean') {
-		if (permission !== 'owner') {
-			return json({ error: 'Apenas o proprietário pode favoritar este item.' }, { status: 403 });
+		if (permission !== 'owner' && permission !== 'editor') {
+			return json({ error: 'Sem permissão para favoritar este item.' }, { status: 403 });
 		}
 		await db.query('UPDATE storage_nodes SET is_starred = ? WHERE id = ?', [
 			body.is_starred ? 1 : 0,
@@ -63,17 +61,16 @@ export const PATCH: RequestHandler = async ({ locals, params, request, getClient
 		]);
 	}
 
-	// Restore from trash (owner only)
+	// Restore from trash (manager or editor)
 	if (body.restore === true) {
-		if (permission !== 'owner') {
-			return json({ error: 'Apenas o proprietário pode restaurar.' }, { status: 403 });
+		if (permission !== 'owner' && permission !== 'editor') {
+			return json({ error: 'Sem permissão para restaurar.' }, { status: 403 });
 		}
-		// If parent was deleted or trashed, restore to root
 		let targetParentId = node.parent_id;
 		if (targetParentId) {
 			const [pRows] = await db.query<RowDataPacket[]>(
-				'SELECT id, is_trashed FROM storage_nodes WHERE id = ? LIMIT 1',
-				[targetParentId]
+				'SELECT id, is_trashed FROM storage_nodes WHERE id = ? AND workspace_id = ? LIMIT 1',
+				[targetParentId, node.workspace_id]
 			);
 			if (pRows.length === 0 || pRows[0].is_trashed) {
 				targetParentId = null;
@@ -108,7 +105,7 @@ export const PATCH: RequestHandler = async ({ locals, params, request, getClient
 		return json({ ok: true });
 	}
 
-	// Rename (owner or editor)
+	// Rename (manager or editor)
 	if (typeof body.name === 'string') {
 		if (permission !== 'owner' && permission !== 'editor') {
 			return json({ error: 'Sem permissão para renomear.' }, { status: 403 });
@@ -125,30 +122,32 @@ export const PATCH: RequestHandler = async ({ locals, params, request, getClient
 		});
 	}
 
-	// Move to another folder (owner only)
+	// Move to another folder inside the same workspace (manager or editor)
 	if (body.parent_id !== undefined) {
-		if (permission !== 'owner') {
-			return json({ error: 'Apenas o proprietário pode mover este item.' }, { status: 403 });
+		if (permission !== 'owner' && permission !== 'editor') {
+			return json({ error: 'Sem permissão para mover este item.' }, { status: 403 });
 		}
 		const newParentId = body.parent_id ? String(body.parent_id) : null;
 
 		if (newParentId === node.id) {
-			return json({ error: 'Não é possível mover uma pasta para dentro de si mesma.' }, { status: 400 });
+			return json(
+				{ error: 'Não é possível mover uma pasta para dentro de si mesma.' },
+				{ status: 400 }
+			);
 		}
 
 		if (newParentId) {
-			// Verify target folder belongs to owner and is not a descendant of node
 			const [pRows] = await db.query<RowDataPacket[]>(
-				`SELECT id, owner_id, type, is_trashed FROM storage_nodes WHERE id = ? LIMIT 1`,
+				`SELECT id, workspace_id, type, is_trashed FROM storage_nodes WHERE id = ? LIMIT 1`,
 				[newParentId]
 			);
 			if (
 				pRows.length === 0 ||
-				String(pRows[0].owner_id) !== locals.user.id ||
+				String(pRows[0].workspace_id) !== node.workspace_id ||
 				pRows[0].type !== 'folder' ||
 				pRows[0].is_trashed
 			) {
-				return json({ error: 'Pasta de destino inválida.' }, { status: 400 });
+				return json({ error: 'Pasta de destino inválida nesta workspace.' }, { status: 400 });
 			}
 
 			if (node.type === 'folder') {
@@ -185,8 +184,11 @@ export const DELETE: RequestHandler = async ({ locals, params, url, getClientAdd
 	}
 
 	const permanent = url.searchParams.get('permanent') === 'true';
-	if (permanent && permission !== 'owner' && locals.user.role !== 'admin') {
-		return json({ error: 'Sem permissão para exclusão permanente.' }, { status: 403 });
+	if (permanent && permission !== 'owner') {
+		return json(
+			{ error: 'Apenas gestores da workspace podem excluir permanentemente.' },
+			{ status: 403 }
+		);
 	}
 	if (!permanent && permission !== 'owner' && permission !== 'editor') {
 		return json({ error: 'Sem permissão para excluir.' }, { status: 403 });
@@ -224,7 +226,6 @@ export const DELETE: RequestHandler = async ({ locals, params, url, getClientAdd
 		return json({ ok: true });
 	}
 
-	// Permanent deletion: collect all disk paths before deleting from DB
 	const diskPaths: string[] = [];
 	if (node.disk_path) diskPaths.push(node.disk_path);
 
@@ -237,12 +238,11 @@ export const DELETE: RequestHandler = async ({ locals, params, url, getClientAdd
 
 	await db.query('DELETE FROM storage_nodes WHERE id = ?', [node.id]);
 
-	// Delete physical blobs from disk if no remaining DB rows reference them
 	for (const dp of new Set(diskPaths)) {
 		await deleteDiskBlobIfUnreferenced(dp);
 	}
 
-	const usedBytes = await recalculateUserUsedBytes(node.owner_id);
+	const usedBytes = await recalculateWorkspaceUsedBytes(node.workspace_id);
 
 	await logAudit({
 		userId: locals.user.id,

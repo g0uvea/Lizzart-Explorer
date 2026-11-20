@@ -1,6 +1,6 @@
--- Lizzart Explorer - MariaDB Schema v2
--- Usuários por username (imutável) + nome/sobrenome, 2FA TOTP local, avatares, cor de tema global,
--- uploads retomáveis em chunks, permissões, compartilhamentos, auditoria e casca Minecraft
+-- Lizzart Explorer - MariaDB Schema v3
+-- Workspaces desacopladas de usuários (cotas por workspace), segurança EdDSA JWT + Refresh Reuse Detection + AES-256-GCM,
+-- perfis de desempenho dinâmicos, backups do banco de dados, uploads retomáveis 8-20MB e casca Minecraft
 
 CREATE DATABASE IF NOT EXISTS `lizzart_explorer`
   CHARACTER SET utf8mb4
@@ -15,8 +15,6 @@ CREATE TABLE IF NOT EXISTS `users` (
   `last_name` VARCHAR(80) NOT NULL,
   `password_hash` VARCHAR(255) NOT NULL,
   `role` ENUM('admin', 'user') NOT NULL DEFAULT 'user',
-  `quota_bytes` BIGINT NOT NULL DEFAULT 10737418240,
-  `used_bytes` BIGINT NOT NULL DEFAULT 0,
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
   `avatar_color` VARCHAR(32) NOT NULL DEFAULT '#10b981',
   `avatar_path` VARCHAR(255) NULL,
@@ -25,8 +23,11 @@ CREATE TABLE IF NOT EXISTS `users` (
   `default_view_mode` ENUM('grid', 'list') NOT NULL DEFAULT 'grid',
   `default_sort_by` ENUM('name', 'date', 'size') NOT NULL DEFAULT 'name',
   `default_sort_dir` ENUM('asc', 'desc') NOT NULL DEFAULT 'asc',
-  `totp_secret` VARCHAR(128) NULL,
+  `totp_secret` VARCHAR(512) NULL,
   `totp_enabled` TINYINT(1) NOT NULL DEFAULT 0,
+  `totp_last_step` BIGINT NULL,
+  `failed_login_count` INT NOT NULL DEFAULT 0,
+  `locked_until` DATETIME NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -36,7 +37,12 @@ CREATE TABLE IF NOT EXISTS `users` (
 CREATE TABLE IF NOT EXISTS `sessions` (
   `id` CHAR(36) NOT NULL,
   `user_id` CHAR(36) NOT NULL,
-  `refresh_token_hash` CHAR(64) NOT NULL,
+  `token_family` CHAR(36) NOT NULL,
+  `refresh_token_hash` CHAR(128) NOT NULL,
+  `previous_token_hash` CHAR(128) NULL,
+  `rotated_at` DATETIME NULL,
+  `rotation_count` INT NOT NULL DEFAULT 0,
+  `device_label` VARCHAR(120) NULL,
   `ip_address` VARCHAR(64) NULL,
   `user_agent` VARCHAR(255) NULL,
   `last_used_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -44,14 +50,49 @@ CREATE TABLE IF NOT EXISTS `sessions` (
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_sessions_refresh_hash` (`refresh_token_hash`),
+  KEY `idx_sessions_prev_hash` (`previous_token_hash`),
+  KEY `idx_sessions_family` (`token_family`),
   KEY `idx_sessions_user` (`user_id`),
   KEY `idx_sessions_expires` (`expires_at`),
   CONSTRAINT `fk_sessions_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `workspaces` (
+  `id` CHAR(36) NOT NULL,
+  `name` VARCHAR(120) NOT NULL,
+  `slug` VARCHAR(80) NOT NULL,
+  `description` VARCHAR(255) NULL,
+  `color` VARCHAR(32) NOT NULL DEFAULT '#10b981',
+  `quota_bytes` BIGINT NOT NULL DEFAULT 10737418240,
+  `used_bytes` BIGINT NOT NULL DEFAULT 0,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_by` CHAR(36) NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_workspaces_slug` (`slug`),
+  CONSTRAINT `fk_workspaces_creator` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `workspace_members` (
+  `id` CHAR(36) NOT NULL,
+  `workspace_id` CHAR(36) NOT NULL,
+  `user_id` CHAR(36) NOT NULL,
+  `role` ENUM('manager', 'editor', 'viewer') NOT NULL DEFAULT 'editor',
+  `assigned_by` CHAR(36) NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ws_member` (`workspace_id`, `user_id`),
+  KEY `idx_ws_member_user` (`user_id`),
+  CONSTRAINT `fk_ws_member_ws` FOREIGN KEY (`workspace_id`) REFERENCES `workspaces` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_ws_member_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_ws_member_assigner` FOREIGN KEY (`assigned_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `storage_nodes` (
   `id` CHAR(36) NOT NULL,
-  `owner_id` CHAR(36) NOT NULL,
+  `workspace_id` CHAR(36) NOT NULL,
+  `created_by` CHAR(36) NULL,
   `parent_id` CHAR(36) NULL,
   `type` ENUM('folder', 'file') NOT NULL,
   `name` VARCHAR(255) NOT NULL,
@@ -65,18 +106,19 @@ CREATE TABLE IF NOT EXISTS `storage_nodes` (
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  KEY `idx_nodes_owner_parent_trash` (`owner_id`, `parent_id`, `is_trashed`),
-  KEY `idx_nodes_owner_star` (`owner_id`, `is_starred`, `is_trashed`),
+  KEY `idx_nodes_ws_parent_trash` (`workspace_id`, `parent_id`, `is_trashed`),
+  KEY `idx_nodes_ws_star` (`workspace_id`, `is_starred`, `is_trashed`),
   KEY `idx_nodes_disk_path` (`disk_path`),
   KEY `idx_nodes_name` (`name`),
-  CONSTRAINT `fk_nodes_owner` FOREIGN KEY (`owner_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_nodes_workspace` FOREIGN KEY (`workspace_id`) REFERENCES `workspaces` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_nodes_creator` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_nodes_parent` FOREIGN KEY (`parent_id`) REFERENCES `storage_nodes` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `upload_sessions` (
   `id` CHAR(36) NOT NULL,
+  `workspace_id` CHAR(36) NOT NULL,
   `user_id` CHAR(36) NOT NULL,
-  `owner_id` CHAR(36) NOT NULL,
   `parent_id` CHAR(36) NULL,
   `fingerprint` VARCHAR(255) NOT NULL,
   `file_name` VARCHAR(255) NOT NULL,
@@ -88,16 +130,16 @@ CREATE TABLE IF NOT EXISTS `upload_sessions` (
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  KEY `idx_upload_lookup` (`user_id`, `fingerprint`, `status`),
-  CONSTRAINT `fk_upload_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_upload_owner` FOREIGN KEY (`owner_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+  KEY `idx_upload_lookup` (`user_id`, `workspace_id`, `fingerprint`, `status`),
+  CONSTRAINT `fk_upload_workspace` FOREIGN KEY (`workspace_id`) REFERENCES `workspaces` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_upload_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `node_permissions` (
   `id` CHAR(36) NOT NULL,
   `node_id` CHAR(36) NOT NULL,
   `user_id` CHAR(36) NOT NULL,
-  `granted_by` CHAR(36) NOT NULL,
+  `granted_by` CHAR(36) NULL,
   `permission` ENUM('viewer', 'editor') NOT NULL DEFAULT 'viewer',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -105,13 +147,13 @@ CREATE TABLE IF NOT EXISTS `node_permissions` (
   KEY `idx_perm_user` (`user_id`),
   CONSTRAINT `fk_perm_node` FOREIGN KEY (`node_id`) REFERENCES `storage_nodes` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_perm_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_perm_granted_by` FOREIGN KEY (`granted_by`) REFERENCES `users` (`id`) ON DELETE CASCADE
+  CONSTRAINT `fk_perm_granted_by` FOREIGN KEY (`granted_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `share_links` (
   `id` CHAR(36) NOT NULL,
   `node_id` CHAR(36) NOT NULL,
-  `created_by` CHAR(36) NOT NULL,
+  `created_by` CHAR(36) NULL,
   `token` VARCHAR(64) NOT NULL,
   `password_hash` VARCHAR(255) NULL,
   `expires_at` DATETIME NULL,
@@ -123,7 +165,22 @@ CREATE TABLE IF NOT EXISTS `share_links` (
   UNIQUE KEY `uq_share_token` (`token`),
   KEY `idx_share_node` (`node_id`),
   CONSTRAINT `fk_share_node` FOREIGN KEY (`node_id`) REFERENCES `storage_nodes` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_share_creator` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE CASCADE
+  CONSTRAINT `fk_share_creator` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `db_backups` (
+  `id` CHAR(36) NOT NULL,
+  `file_name` VARCHAR(255) NOT NULL,
+  `file_path` VARCHAR(512) NOT NULL,
+  `size_bytes` BIGINT NOT NULL DEFAULT 0,
+  `sha256` CHAR(64) NOT NULL,
+  `method` ENUM('mariadb-dump', 'sql-native', 'uploaded') NOT NULL DEFAULT 'mariadb-dump',
+  `compressed` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_by` CHAR(36) NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_backups_created` (`created_at`),
+  CONSTRAINT `fk_backup_creator` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `audit_logs` (

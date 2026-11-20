@@ -11,32 +11,64 @@
 		AlertCircle,
 		ChevronDown,
 		ChevronUp,
-		RefreshCw
+		RefreshCw,
+		FolderSearch,
+		Zap
 	} from 'lucide-svelte';
 
+	let resumeFileInput = $state<HTMLInputElement | null>(null);
+	let resumeTargetId = $state<string | null>(null);
+
 	let activeCount = $derived(
-		transferManager.items.filter((i) => i.status === 'active' || i.status === 'retrying' || i.status === 'queued').length
+		transferManager.items.filter(
+			(i) => i.status === 'active' || i.status === 'retrying' || i.status === 'queued'
+		).length
 	);
+
+	function pickFileForResume(id: string) {
+		resumeTargetId = id;
+		resumeFileInput?.click();
+	}
+
+	function onResumeFileSelected(e: Event) {
+		const input = e.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		if (file && resumeTargetId) {
+			transferManager.attachFileToResume(resumeTargetId, file);
+		}
+		resumeTargetId = null;
+		input.value = '';
+	}
 </script>
 
+<input
+	bind:this={resumeFileInput}
+	type="file"
+	class="hidden"
+	onchange={onResumeFileSelected}
+/>
+
 {#if transferManager.items.length > 0}
-	<div class="fixed right-4 bottom-4 z-50 w-full max-w-sm overflow-hidden rounded-2xl border border-[#233047] bg-[#111929]/95 shadow-2xl backdrop-blur-xl">
+	<!-- Mobile-safe bottom positioning: never overflows off-screen, never overlaps Top-Right Toasts -->
+	<div
+		class="fixed inset-x-3 bottom-3 z-50 overflow-hidden rounded-2xl border border-[#233047] bg-[#111929]/95 shadow-2xl backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:bottom-4 sm:w-96"
+	>
 		<!-- Header -->
-		<div class="flex items-center justify-between border-b border-[#1f2d45] bg-[#0e1525] px-4 py-2.5">
-			<div class="flex items-center gap-2 text-xs font-semibold text-white">
+		<div class="flex items-center justify-between gap-2 border-b border-[#1f2d45] bg-[#0e1525] px-3.5 py-2.5 sm:px-4">
+			<div class="flex min-w-0 items-center gap-2 text-xs font-semibold text-white">
 				{#if activeCount > 0}
-					<span class="h-2 w-2 animate-pulse rounded-full bg-accent-400"></span>
-					<span>Transferindo ({activeCount})</span>
+					<span class="h-2 w-2 shrink-0 animate-pulse rounded-full bg-accent-400"></span>
+					<span class="truncate">Transferindo ({activeCount})</span>
 				{:else}
-					<CheckCircle2 class="h-4 w-4 text-accent-400" />
-					<span>Transferências ({transferManager.items.length})</span>
+					<CheckCircle2 class="h-4 w-4 shrink-0 text-accent-400" />
+					<span class="truncate">Transferências ({transferManager.items.length})</span>
 				{/if}
 			</div>
-			<div class="flex items-center gap-1">
+			<div class="flex shrink-0 items-center gap-1">
 				<button
 					type="button"
 					onclick={() => transferManager.clearFinished()}
-					class="rounded px-2 py-0.5 text-[11px] text-slate-400 hover:bg-[#1a263e] hover:text-white"
+					class="rounded px-2 py-1 text-[11px] text-slate-400 hover:bg-[#1a263e] hover:text-white"
 				>
 					Limpar
 				</button>
@@ -56,10 +88,15 @@
 		</div>
 
 		{#if !transferManager.minimized}
-			<div class="max-h-72 divide-y divide-[#1a253a] overflow-y-auto">
+			<div class="max-h-64 divide-y divide-[#1a253a] overflow-y-auto sm:max-h-72">
 				{#each transferManager.items as item (item.id)}
-					{@const pct = item.totalBytes > 0 ? Math.min(100, Math.round((item.transferredBytes / item.totalBytes) * 100)) : item.status === 'done' ? 100 : 0}
-					<div class="p-3.5">
+					{@const pct =
+						item.totalBytes > 0
+							? Math.min(100, Math.round((item.transferredBytes / item.totalBytes) * 100))
+							: item.status === 'done'
+								? 100
+								: 0}
+					<div class="p-3 sm:p-3.5">
 						<div class="flex items-start justify-between gap-2">
 							<div class="flex min-w-0 items-center gap-2">
 								{#if item.kind === 'upload'}
@@ -72,7 +109,17 @@
 								</p>
 							</div>
 							<div class="flex shrink-0 items-center gap-1">
-								{#if item.status === 'active' || item.status === 'retrying'}
+								{#if item.status === 'needs_file'}
+									<button
+										type="button"
+										onclick={() => pickFileForResume(item.id)}
+										class="inline-flex items-center gap-1 rounded-lg bg-accent-500/20 px-2 py-1 text-[10px] font-semibold text-accent-300 hover:bg-accent-500/30"
+										title="Selecionar o arquivo novamente para retomar de onde parou"
+									>
+										<FolderSearch class="h-3 w-3" />
+										Retomar
+									</button>
+								{:else if item.status === 'active' || item.status === 'retrying'}
 									<button
 										type="button"
 										onclick={() => transferManager.pause(item.id)}
@@ -107,7 +154,7 @@
 							<div
 								class="h-full rounded-full transition-all duration-200 {item.status === 'error'
 									? 'bg-rose-500'
-									: item.status === 'paused'
+									: item.status === 'paused' || item.status === 'needs_file'
 										? 'bg-amber-500'
 										: 'bg-accent-500'}"
 								style="width: {pct}%"
@@ -122,15 +169,31 @@
 							<span class="flex items-center gap-1.5 font-mono">
 								{#if item.status === 'active'}
 									<span class="text-accent-300">{formatBytes(item.speedBps)}/s</span>
-									<span class="rounded bg-[#1a263e] px-1 text-slate-300" title="Tamanho dinâmico do chunk">
+									<span
+										class="inline-flex items-center gap-0.5 rounded px-1 {item.stability === 'ultra'
+											? 'bg-emerald-500/20 text-emerald-300'
+											: item.stability === 'unstable'
+												? 'bg-amber-500/20 text-amber-300'
+												: 'bg-[#1a263e] text-slate-300'}"
+										title="Bloco adaptativo (8 MB padrão → até 20 MB em rede ultra-estável)"
+									>
+										{#if item.stability === 'ultra'}
+											<Zap class="h-2.5 w-2.5" />
+										{/if}
 										{Math.round(item.chunkSizeBytes / (1024 * 1024))}MB
 									</span>
+								{:else if item.status === 'queued'}
+									<span class="text-slate-400">Na fila...</span>
 								{:else if item.status === 'retrying'}
 									<span class="inline-flex items-center gap-1 text-amber-300">
-										<RefreshCw class="h-2.5 w-2.5 animate-spin" /> Reconectando...
+										<RefreshCw class="h-2.5 w-2.5 animate-spin" /> Reconectando (8MB)...
 									</span>
+								{:else if item.status === 'needs_file'}
+									<span class="text-amber-300">Interrompido — selecione o arquivo</span>
 								{:else if item.status === 'paused'}
-									<span class="text-amber-300">Pausado</span>
+									<span class="text-amber-300">
+										{item.resumed ? 'Salvo — pronto p/ retomar' : 'Pausado'}
+									</span>
 								{:else if item.status === 'done'}
 									<span class="text-accent-400">Concluído</span>
 								{:else if item.status === 'error'}
@@ -142,7 +205,7 @@
 						</div>
 
 						{#if item.errorMessage}
-							<p class="mt-1 text-[10px] text-rose-300">{item.errorMessage}</p>
+							<p class="mt-1 break-words text-[10px] text-rose-300">{item.errorMessage}</p>
 						{/if}
 					</div>
 				{/each}

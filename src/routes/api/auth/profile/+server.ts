@@ -3,7 +3,12 @@ import type { RequestHandler } from './$types';
 import type { RowDataPacket } from 'mysql2/promise';
 import { getPool } from '$lib/server/db';
 import { hashPassword, verifyPassword } from '$lib/server/crypto';
-import { logAudit, mapUserRow } from '$lib/server/auth';
+import {
+	invalidateUserAuthCache,
+	logAudit,
+	mapUserRow,
+	revokeOtherUserSessions
+} from '$lib/server/auth';
 
 export const PATCH: RequestHandler = async ({ locals, request, getClientAddress }) => {
 	if (!locals.user) return json({ error: 'Não autenticado.' }, { status: 401 });
@@ -14,25 +19,31 @@ export const PATCH: RequestHandler = async ({ locals, request, getClientAddress 
 
 	if (body.currentPassword && body.newPassword) {
 		const newPassword = String(body.newPassword);
-		if (newPassword.length < 6) {
-			return json({ error: 'A nova senha deve ter pelo menos 6 caracteres.' }, { status: 400 });
+		if (newPassword.length < 8) {
+			return json({ error: 'A nova senha deve ter pelo menos 8 caracteres.' }, { status: 400 });
 		}
 		const [rows] = await db.query<RowDataPacket[]>(
 			'SELECT password_hash FROM users WHERE id = ? LIMIT 1',
 			[locals.user.id]
 		);
-		const ok = await verifyPassword(String(body.currentPassword), String(rows[0]?.password_hash || ''));
+		const ok = await verifyPassword(
+			String(body.currentPassword),
+			String(rows[0]?.password_hash || '')
+		);
 		if (!ok) {
 			return json({ error: 'Senha atual incorreta.' }, { status: 400 });
 		}
 		const newHash = await hashPassword(newPassword);
 		await db.query('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, locals.user.id]);
+		// Revoke all other sessions on password change for security
+		await revokeOtherUserSessions(locals.user.id, locals.sessionId);
+
 		await logAudit({
 			userId: locals.user.id,
 			action: 'profile.password_change',
 			targetType: 'user',
 			targetId: locals.user.id,
-			details: 'Senha alterada pelo próprio usuário',
+			details: 'Senha alterada pelo usuário (outras sessões encerradas)',
 			ipAddress: getClientAddress()
 		});
 		return json({ ok: true });
@@ -91,8 +102,10 @@ export const PATCH: RequestHandler = async ({ locals, request, getClientAddress 
 		]
 	);
 
+	invalidateUserAuthCache(locals.user.id);
+
 	const [updated] = await db.query<RowDataPacket[]>(
-		`SELECT id, username, first_name, last_name, role, quota_bytes, used_bytes, is_active,
+		`SELECT id, username, first_name, last_name, role, is_active,
 		        avatar_color, avatar_path, accent_color, layout_density,
 		        default_view_mode, default_sort_by, default_sort_dir, totp_enabled, created_at
 		 FROM users WHERE id = ?`,

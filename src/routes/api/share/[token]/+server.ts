@@ -9,17 +9,22 @@ export const GET: RequestHandler = async ({ params }) => {
 	const db = getPool();
 	const [rows] = await db.query<RowDataPacket[]>(
 		`SELECT sl.*, n.name, n.mime_type, n.size_bytes, n.is_trashed, n.created_at AS file_created_at,
-		        CONCAT(u.first_name, ' ', u.last_name) AS owner_name
+		        w.name AS workspace_name,
+		        CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS creator_name
 		 FROM share_links sl
 		 INNER JOIN storage_nodes n ON n.id = sl.node_id
-		 INNER JOIN users u ON u.id = n.owner_id
-		 WHERE sl.token = ? AND sl.is_active = 1
+		 INNER JOIN workspaces w ON w.id = n.workspace_id
+		 LEFT JOIN users u ON u.id = sl.created_by
+		 WHERE sl.token = ? AND sl.is_active = 1 AND w.is_active = 1
 		 LIMIT 1`,
 		[params.token]
 	);
 
 	if (rows.length === 0 || rows[0].is_trashed) {
-		return json({ error: 'Link de compartilhamento não encontrado ou revogado.' }, { status: 404 });
+		return json(
+			{ error: 'Link de compartilhamento não encontrado ou revogado.' },
+			{ status: 404 }
+		);
 	}
 
 	const row = rows[0];
@@ -27,8 +32,14 @@ export const GET: RequestHandler = async ({ params }) => {
 		return json({ error: 'Este link de compartilhamento expirou.' }, { status: 410 });
 	}
 	if (row.max_downloads !== null && Number(row.download_count) >= Number(row.max_downloads)) {
-		return json({ error: 'Este link atingiu o limite máximo de downloads.' }, { status: 410 });
+		return json(
+			{ error: 'Este link atingiu o limite máximo de downloads.' },
+			{ status: 410 }
+		);
 	}
+
+	const creator = String(row.creator_name || '').trim();
+	const ownerLabel = creator ? `${creator} (${row.workspace_name})` : String(row.workspace_name);
 
 	return json({
 		share: {
@@ -36,7 +47,7 @@ export const GET: RequestHandler = async ({ params }) => {
 			name: String(row.name),
 			mime_type: row.mime_type ? String(row.mime_type) : 'application/octet-stream',
 			size_bytes: Number(row.size_bytes ?? 0),
-			owner_name: String(row.owner_name),
+			owner_name: ownerLabel,
 			has_password: Boolean(row.password_hash),
 			expires_at: row.expires_at ? new Date(row.expires_at).toISOString() : null,
 			max_downloads: row.max_downloads !== null ? Number(row.max_downloads) : null,

@@ -6,6 +6,7 @@
 	let username = $state('');
 	let password = $state('');
 	let totpCode = $state('');
+	let challengeToken = $state('');
 	let requires2fa = $state(false);
 	let loading = $state(false);
 	let errorMsg = $state('');
@@ -16,19 +17,22 @@
 		loading = true;
 
 		try {
+			const payload =
+				requires2fa && challengeToken
+					? { challengeToken, totpCode }
+					: { username, password, totpCode: requires2fa ? totpCode : undefined };
+
 			const res = await fetch('/api/auth/login', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					username,
-					password,
-					totpCode: requires2fa ? totpCode : undefined
-				})
+				body: JSON.stringify(payload)
 			});
 
 			const result = await res.json();
 			if (result.requires2fa && !requires2fa) {
 				requires2fa = true;
+				challengeToken = result.challengeToken || '';
+				password = ''; // Clear password from memory once Ed25519 2FA challenge is issued
 				loading = false;
 				return;
 			}
@@ -53,23 +57,23 @@
 	<title>Entrar — Lizzart Explorer</title>
 </svelte:head>
 
-<div class="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0b101b] px-4 py-12">
-	<div class="pointer-events-none absolute -top-40 left-1/2 h-96 w-[42rem] -translate-x-1/2 rounded-full bg-accent-500/15 blur-3xl"></div>
+<div class="relative flex min-h-dvh items-center justify-center overflow-hidden bg-[#0b101b] px-4 py-10">
+	<div class="pointer-events-none absolute -top-40 left-1/2 h-96 w-full max-w-[42rem] -translate-x-1/2 rounded-full bg-accent-500/15 blur-3xl"></div>
 
 	<div class="relative w-full max-w-md">
-		<div class="mb-8 flex flex-col items-center text-center">
+		<div class="mb-6 flex flex-col items-center text-center sm:mb-8">
 			<div class="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-accent-500 to-accent-700 shadow-lg shadow-accent-500/25">
 				<HardDrive class="h-7 w-7 text-white" />
 			</div>
 			<h1 class="text-2xl font-bold tracking-tight text-white">Lizzart Explorer</h1>
-			<p class="mt-1 text-sm text-slate-400">
-				Armazenamento em nuvem privado & painel de servidores
+			<p class="mt-1 text-xs text-slate-400 sm:text-sm">
+				Armazenamento em nuvem privado & workspaces
 			</p>
 		</div>
 
-		<div class="rounded-2xl border border-[#1f2d45] bg-[#131c2e]/90 p-7 shadow-2xl backdrop-blur-xl">
+		<div class="rounded-2xl border border-[#1f2d45] bg-[#131c2e]/90 p-5 shadow-2xl backdrop-blur-xl sm:p-7">
 			{#if errorMsg}
-				<div class="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+				<div class="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-200 sm:text-sm">
 					{errorMsg}
 				</div>
 			{/if}
@@ -116,7 +120,7 @@
 						<KeyRound class="mx-auto mb-2 h-8 w-8 text-accent-400" />
 						<h2 class="text-sm font-semibold text-white">Verificação em 2 Etapas (2FA)</h2>
 						<p class="mt-1 text-xs text-slate-300">
-							Digite o código de 6 dígitos gerado pelo seu aplicativo autenticador para <strong class="font-mono">@{username}</strong>.
+							Digite o código de 6 dígitos do seu autenticador para <strong class="font-mono">@{username}</strong>.
 						</p>
 					</div>
 
@@ -132,7 +136,7 @@
 							required
 							bind:value={totpCode}
 							placeholder="000000"
-							class="w-full rounded-xl border border-[#233047] bg-[#0b101b] py-3 text-center font-mono text-2xl tracking-[0.4em] text-white outline-none focus:border-accent-500"
+							class="w-full rounded-xl border border-[#233047] bg-[#0b101b] py-3 text-center font-mono text-2xl tracking-[0.35em] text-white outline-none focus:border-accent-500"
 						/>
 					</div>
 
@@ -140,6 +144,7 @@
 						type="button"
 						onclick={() => {
 							requires2fa = false;
+							challengeToken = '';
 							totpCode = '';
 							errorMsg = '';
 						}}
@@ -161,7 +166,7 @@
 
 			<div class="mt-6 flex items-center gap-2 rounded-xl border border-[#233047] bg-[#0b101b]/70 px-3.5 py-2.5 text-xs text-slate-400">
 				<ShieldCheck class="h-4 w-4 shrink-0 text-accent-400" />
-				<span>Acesso privado. Novas contas são criadas exclusivamente por administradores.</span>
+				<span>Protegido por EdDSA (Ed25519), Argon2id, AES-256-GCM e rotação anti-reuso.</span>
 			</div>
 		</div>
 	</div>
