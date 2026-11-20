@@ -94,6 +94,7 @@ docker compose up -d
 ## 4. Acompanhar Inicialização
 
 Na primeira vez que o container sobe, ele automaticamente:
+
 1. Gera credenciais seguras do banco e chaves criptográficas (`APP_MASTER_KEY`, `JWT_SECRET`, chave `Ed25519`).
 2. Inicializa o MariaDB internamente (escutando apenas em `127.0.0.1:3306`).
 3. Cria o banco `lizzart_explorer` e todas as tabelas.
@@ -123,24 +124,24 @@ Quando aparecer `Listening on http://0.0.0.0:3000` (ou status `healthy` em `dock
 
 Todo o estado da aplicação e do banco fica isolado dentro do volume `/data`:
 
-| Caminho dentro do volume | O que contém |
-| :--- | :--- |
-| `/data/mariadb` | Banco de dados MariaDB |
-| `/data/storage` | Arquivos enviados (`blobs/`), chunks temporários (`chunks/`), avatares e backups do DB (`backups/`) |
-| `/data/config/.env` | Credenciais do banco e chaves secretas geradas automaticamente (`chmod 600`) |
-| `/data/config/.lizzart-ed25519.pem` | Chave privada Ed25519 usada nos tokens JWT |
+| Caminho dentro do volume            | O que contém                                                                                        |
+| :---------------------------------- | :-------------------------------------------------------------------------------------------------- |
+| `/data/mariadb`                     | Banco de dados MariaDB                                                                              |
+| `/data/storage`                     | Arquivos enviados (`blobs/`), chunks temporários (`chunks/`), avatares e backups do DB (`backups/`) |
+| `/data/config/.env`                 | Credenciais do banco e chaves secretas geradas automaticamente (`chmod 600`)                        |
+| `/data/config/.lizzart-ed25519.pem` | Chave privada Ed25519 usada nos tokens JWT                                                          |
 
 ---
 
 ## 7. Variáveis de Ambiente Opcionais
 
-| Variável | Padrão | Descrição |
-| :--- | :--- | :--- |
-| `PORT` | `3000` | Porta HTTP interna da aplicação |
+| Variável           | Padrão      | Descrição                                                                                                         |
+| :----------------- | :---------- | :---------------------------------------------------------------------------------------------------------------- |
+| `PORT`             | `3000`      | Porta HTTP interna da aplicação                                                                                   |
 | `PERFORMANCE_MODE` | `optimized` | Perfil inicial: `ultra_optimized`, `optimized`, `fast` ou `ultra_fast` (também editável depois pelo Painel Admin) |
-| `ORIGIN` | *(vazio)* | URL pública completa quando atrás de proxy reverso (ex.: `https://nuvem.suaempresa.com`) |
-| `FORCE_HTTPS` | *(vazio)* | Defina `true` quando servido via HTTPS para ativar cookies `Secure` e HSTS |
-| `SESSION_TTL_DAYS` | `7` | Duração da sessão (refresh token) em dias |
+| `ORIGIN`           | _(vazio)_   | URL pública completa quando atrás de proxy reverso (ex.: `https://nuvem.suaempresa.com`)                          |
+| `FORCE_HTTPS`      | _(vazio)_   | Defina `true` quando servido via HTTPS para ativar cookies `Secure` e HSTS                                        |
+| `SESSION_TTL_DAYS` | `7`         | Duração da sessão (refresh token) em dias                                                                         |
 
 ---
 
