@@ -1,55 +1,50 @@
 # Lizzart Explorer
 
-Sistema completo de **Armazenamento de Arquivos em Nuvem & Home-NAS / Corporativo** construído com **Bun + TypeScript + SvelteKit + Tailwind CSS + MariaDB**, projetado para ser seguro, leve, escalável e confiável.
-
-## Recursos Principais
-
-- **Workspaces Desacopladas dos Usuários**:
-  - Contas de usuários e Workspaces são entidades independentes — excluir ou suspender usuários **nunca** apaga os arquivos ou pastas das workspaces.
-  - Cotas de armazenamento (mín. 10 GB ou ilimitada) pertencem às **Workspaces**, com suporte a múltiplos usuários conectados simultaneamente (`Gestor`, `Editor`, `Leitor`).
-  - Toda conta nova (incluindo o Admin inicial no `/setup`) começa **sem workspace conectada**; o administrador cria workspaces e gerencia os vínculos no Painel Admin (`/admin`).
-- **Segurança & Criptografia de Ponta**:
-  - **JWT Assimétrico EdDSA (Ed25519)** com rotação de chaves automática (`kid`, `iss`, `aud`, fingerprint de dispositivo).
-  - **Refresh Token Rotation** com hash **HMAC-SHA512** (chave derivada por HKDF-SHA256) e **detecção automática de reuso/roubo de token** (revoga a família de sessões inteira imediatamente em caso de replay).
-  - **Argon2id** para senhas (com defesa contra enumeração por tempo constante e bloqueio progressivo contra força bruta).
-  - **2FA Local (TOTP RFC 6238)** com segredo criptografado em repouso (**AES-256-GCM**), desafio assinado Ed25519 (`challengeToken`) e proteção anti-replay de códigos.
-  - Proteção **CSRF Origin / Sec-Fetch-Site**, cookies `HttpOnly` + `SameSite=Lax` + `Secure` (automático em HTTPS/Proxy), HSTS e CSP.
-- **Desempenho Configurável pelo Painel Admin**:
-  - 4 perfis dinâmicos aplicados em tempo real sem reiniciar:
-    - **Extremamente Otimizada**: consumo mínimo de RAM/CPU para Home-NAS, Raspberry Pi ou VPS enxuta.
-    - **Otimizada**: equilíbrio inteligente (padrão recomendado).
-    - **Rápida**: pool MariaDB ampliado, cache longo e maior paralelismo de I/O.
-    - **Extremamente Rápida**: throughput máximo para redes gigabit e servidores dedicados.
-  - Telemetria ao vivo de memória, CPU, cache TTL/LRU, pool de banco e semáforo de I/O.
-- **Backup & Restauração do Banco de Dados MariaDB**:
-  - Geração de backups sob demanda (`.sql.gz` ou `.sql`) via `mariadb-dump` (com fallback SQL nativo), verificação SHA-256, download direto, backup automático agendado (diário/semanal) com retenção e restauração segura (com snapshot automático pré-restauração).
-- **Uploads & Downloads Retomáveis (Resistentes a Queda de Energia e Rede)**:
-  - **Uploads em blocos adaptativos de 8 MB até 20 MB**: inicia em **8 MB** e só escala até **20 MB** quando a conexão comprova velocidade muito alta e baixíssima variação (jitter); cai imediatamente para **8 MB** diante de qualquer instabilidade.
-  - Gravação em streaming direto no disco com `datasync()` + verificação **SHA-256** por bloco + recuperação de uploads interrompidos após queda de energia/reload (`/api/files/upload/pending`).
-  - **Downloads persistidos em disco local (IndexedDB)** por chunks com HTTP `Range` + `If-Range` (`ETag`), permitindo retomar exatamente de onde parou mesmo após fechar o navegador ou cair a energia.
-- **Interface 100% Responsiva (Desktop & Mobile)**:
-  - Menu de contexto em **Bottom Sheet** no celular, zero colisões entre fila de transferências e notificações, suporte touch no recorte lossless de imagens, breadcrumbs e abas roláveis.
+Sistema completo de **Armazenamento de Arquivos em Nuvem** construído com **Bun + TypeScript + SvelteKit + Tailwind CSS + MariaDB**, projetado para ser seguro, leve, confiável e escalável — ideal tanto para **Home-NAS** quanto para **empresas de pequeno, médio e grande porte**.
 
 ---
 
-## Docker Unificado (MariaDB + Aplicação em uma só imagem)
+## Principais Recursos
 
-A imagem unificada entrega o **MariaDB** (restrito a `127.0.0.1` internamente) e o **Lizzart Explorer** gerenciados juntos com encerramento gracioso (`tini` + `mariadb-admin shutdown`), credenciais auto-geradas persistidas e volume único em `/data`.
+- **Workspaces Desacopladas dos Usuários**:
+  - Contas e Workspaces são objetos independentes: excluir ou suspender usuários **nunca** apaga arquivos ou pastas das workspaces.
+  - Cotas de armazenamento (mín. 10 GB ou ilimitada) pertencem às **Workspaces**, com suporte a múltiplos usuários conectados (`Gestor`, `Editor`, `Leitor`).
+  - Todas as contas (inclusive o Admin inicial em `/setup`) iniciam sem workspace vinculada; o administrador cria workspaces e gerencia os vínculos no Painel Admin (`/admin`).
+- **Segurança & Criptografia de Ponta**:
+  - **JWT Assimétrico EdDSA (Ed25519)** com rotação de refresh tokens em **HMAC-SHA512** (chave derivada por HKDF-SHA256) e **detecção automática de reuso/roubo de token**.
+  - **Argon2id** para senhas (com defesa anti-enumeração e bloqueio progressivo contra força bruta).
+  - **2FA Local (TOTP RFC 6238)** com segredo criptografado em **AES-256-GCM**, desafio assinado Ed25519 e proteção anti-replay.
+  - Proteção **CSRF** (`Origin` / `Sec-Fetch-Site`), cookies `HttpOnly` + `SameSite=Lax` + `Secure` (HTTPS), CSP e HSTS.
+- **4 Perfis de Desempenho Editáveis no Painel Admin**:
+  - **Extremamente Otimizada**, **Otimizada**, **Rápida** e **Extremamente Rápida** — ajustam em tempo real pool do MariaDB, buffers de streaming, semáforo de I/O, cache TTL/LRU, Argon2id e paralelismo da interface, com telemetria ao vivo.
+- **Backup & Restauração do MariaDB**:
+  - Snapshots `.sql.gz` / `.sql` sob demanda ou agendados (diário/semanal), verificação SHA-256, download direto e restauração segura com snapshot automático pré-restauração.
+- **Uploads & Downloads Retomáveis (8 MB → 20 MB)**:
+  - Uploads em blocos adaptativos de **8 MB** até no máximo **20 MB** (apenas em redes ultra-rápidas e estáveis; retorna imediatamente para **8 MB** em qualquer instabilidade), com streaming direto + `datasync()` + SHA-256 por bloco.
+  - Downloads via HTTP `Range` + `If-Range` (`ETag`) persistidos em IndexedDB, retomando exatamente de onde pararam após queda de rede, recarregamento ou queda de energia.
+- **Interface Responsiva (Desktop & Mobile)**:
+  - Layout adaptado para celulares sem cortes ou sobreposições, menu de contexto em Bottom Sheet no mobile, seleção marquee, drag-and-drop, player de vídeo/áudio e editor de recorte PNG lossless.
+- **Docker All-in-One Exportável**:
+  - MariaDB + Aplicação empacotados em uma única imagem segura e pronta para importar em qualquer servidor ou NAS.
 
-### Construir e Exportar a Imagem
+---
+
+## Início Rápido
+
+### Com Docker Unificado (Recomendado)
 
 ```bash
-bun run docker:export
-# Gera: dist/lizzart-explorer-allinone.tar.gz (+ .sha256)
+# Construir e exportar a imagem unificada (.tar.gz + .sha256)
+make deploy
+
+# Ou subir diretamente via Docker Compose
+make docker-up
 ```
 
-### Importar e Executar em Qualquer Servidor / Home-NAS
+Para importar uma imagem já exportada em outra máquina:
 
 ```bash
-# 1. Importar a imagem exportada
 docker load -i dist/lizzart-explorer-allinone.tar.gz
-
-# 2. Subir o container unificado (MariaDB + App) com volume persistente
 docker run -d \
   --name lizzart-explorer \
   -p 3000:3000 \
@@ -58,19 +53,24 @@ docker run -d \
   lizzart-explorer:latest
 ```
 
-Ou usando Docker Compose:
+### Desenvolvimento Local
 
 ```bash
-docker compose up -d
+make install
+cp .env.example .env
+make dev
 ```
 
-Acesse **`http://localhost:3000`** (ou conecte atrás do seu proxy reverso / Nginx / Caddy / Cloudflare Tunnel definindo `ORIGIN=https://seu-dominio` e `FORCE_HTTPS=true`).
+Acesse **`http://localhost:3000`** (Docker / `make start`) ou **`http://localhost:5173`** (`make dev`). Na primeira inicialização, você será direcionado para `/setup` para criar a conta Administradora.
 
 ---
 
-## Desenvolvimento Local
+## Documentação
 
-```bash
-bun install
-bun run dev
-```
+Consulte a pasta [`docs/`](docs/README.md) para guias detalhados:
+
+- **[Guia de Instalação](docs/INSTALACAO.md)** (Docker All-in-One, Proxy Reverso HTTPS e Instalação Local)
+- **[Arquitetura & Banco de Dados](docs/ARQUITETURA.md)**
+- **[Segurança & Criptografia](docs/SEGURANCA.md)**
+- **[Workspaces, Arquivos & Transferências Retomáveis](docs/WORKSPACES-E-ARQUIVOS.md)**
+- **[Administração, Perfis de Desempenho & Backups](docs/ADMINISTRACAO-E-OPERACAO.md)**
