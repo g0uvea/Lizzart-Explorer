@@ -1,83 +1,154 @@
-# Guia de Instalação — Lizzart Explorer
+# Guia de Instalação — Lizzart Explorer (Imagem Docker Unificada)
 
-Este guia cobre as duas formas oficiais de instalar e executar o **Lizzart Explorer**:
+Este guia foi feito para quem vai **instalar e rodar o Lizzart Explorer diretamente a partir da imagem Docker pronta** (`lizzart-explorer-allinone.tar.gz`), **sem precisar clonar código-fonte, instalar Bun ou compilar nada**.
 
-1. **Docker Unificado (Recomendado)** — MariaDB + Aplicação em uma única imagem pronta para produção, Home-NAS ou servidores corporativos.
-2. **Instalação Local (Bare-Metal)** — Executando diretamente no host Linux com Bun e MariaDB.
+A imagem já entrega **MariaDB + Lizzart Explorer** integrados e pré-configurados em um único container, com geração automática de credenciais e persistência em volume único.
 
 ---
 
-## Opção 1: Docker Unificado (MariaDB + Aplicação)
+## 1. Pré-requisitos
 
-A imagem unificada contém o **MariaDB 10.11** (vinculado exclusivamente a `127.0.0.1` dentro do container) e a aplicação **Lizzart Explorer** rodando juntos sob supervisão do `tini` e `docker/entrypoint.sh`, com encerramento gracioso e persistência em um único volume `/data`.
+- **Docker Engine** instalado no servidor, VPS, PC ou Home-NAS (Linux, Windows com Docker Desktop/WSL2 ou macOS).
+- Porta **`3000`** (ou outra porta de sua escolha) liberada.
 
-### Pré-requisitos
-- Docker Engine (`24+` recomendado) e Docker Compose (opcional).
-- Porta `3000` (ou outra de sua escolha) disponível no host.
-
-### 1A. Importando a imagem exportada (`.tar.gz`)
-
-Se você recebeu ou gerou o pacote `dist/lizzart-explorer-allinone.tar.gz`:
+Verifique se o Docker está ativo:
 
 ```bash
-# (Opcional) Verificar integridade do arquivo
-sha256sum -c dist/lizzart-explorer-allinone.tar.gz.sha256
+docker --version
+```
+
+---
+
+## 2. Importar a Imagem Docker
+
+Coloque o arquivo **`lizzart-explorer-allinone.tar.gz`** (e, se enviado junto, o `.sha256`) na máquina onde o servidor vai rodar.
+
+```bash
+# (Opcional) Conferir integridade do arquivo recebido
+sha256sum -c lizzart-explorer-allinone.tar.gz.sha256
 
 # Importar a imagem para o Docker local
-docker load -i dist/lizzart-explorer-allinone.tar.gz
+docker load -i lizzart-explorer-allinone.tar.gz
+```
 
-# Iniciar o container com volume persistente
+Confirme que a imagem apareceu na lista local:
+
+```bash
+docker images lizzart-explorer
+```
+
+---
+
+## 3. Iniciar o Container
+
+Você pode subir com **`docker run`** (um único comando) ou com **`docker compose`**.
+
+### Opção A: Via `docker run` (Mais simples)
+
+```bash
 docker run -d \
   --name lizzart-explorer \
   -p 3000:3000 \
   -v lizzart_data:/data \
+  -e PERFORMANCE_MODE=optimized \
   --restart unless-stopped \
   lizzart-explorer:latest
 ```
 
-Ou usando o `Makefile`:
+### Opção B: Via `docker-compose.yml`
 
-```bash
-make docker-load
-make docker-up
+Crie um arquivo `docker-compose.yml` na pasta desejada:
+
+```yaml
+services:
+  lizzart-explorer:
+    image: lizzart-explorer:latest
+    container_name: lizzart-explorer
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      PERFORMANCE_MODE: "optimized"
+      # Descomente abaixo se for acessar por domínio externo com HTTPS:
+      # ORIGIN: "https://nuvem.seudominio.com"
+      # FORCE_HTTPS: "true"
+    volumes:
+      - lizzart_data:/data
+    stop_grace_period: 30s
+
+volumes:
+  lizzart_data:
 ```
 
-### 1B. Construindo a partir do código-fonte
+E inicie em segundo plano:
 
 ```bash
-# Subir diretamente com Docker Compose
-make docker-up
-
-# Ou gerar a imagem e exportar o .tar.gz para levar para outro servidor / NAS
-make deploy
+docker compose up -d
 ```
 
-### Estrutura do Volume `/data`
+> **Dica para Home-NAS / Pasta específica no host**: se preferir salvar os dados em uma pasta física visível no seu servidor (ex.: `/mnt/hd/lizzart-data`), troque `-v lizzart_data:/data` por `-v /mnt/hd/lizzart-data:/data`.
 
-Tudo que é persistente fica concentrado em `/data`:
+---
 
-| Caminho no container | Conteúdo |
+## 4. Acompanhar Inicialização
+
+Na primeira vez que o container sobe, ele automaticamente:
+1. Gera credenciais seguras do banco e chaves criptográficas (`APP_MASTER_KEY`, `JWT_SECRET`, chave `Ed25519`).
+2. Inicializa o MariaDB internamente (escutando apenas em `127.0.0.1:3306`).
+3. Cria o banco `lizzart_explorer` e todas as tabelas.
+4. Sobe a aplicação na porta `3000`.
+
+Para acompanhar os logs:
+
+```bash
+docker logs -f lizzart-explorer
+```
+
+Quando aparecer `Listening on http://0.0.0.0:3000` (ou status `healthy` em `docker ps`), o sistema estará pronto.
+
+---
+
+## 5. Primeiro Acesso (`/setup`)
+
+1. Abra no navegador: **`http://IP-DO-SERVIDOR:3000`** (ou `http://localhost:3000` se estiver na mesma máquina).
+2. Como ainda não existe nenhum administrador, você será direcionado automaticamente para **`/setup`**.
+3. Preencha os dados do **Administrador principal** (`@usuário`, nome, sobrenome e senha com mínimo de 8 caracteres).
+4. Ao entrar, sua conta iniciará **sem nenhuma workspace conectada**.
+5. Vá em **Painel Admin → Workspaces**, clique em **Nova Workspace**, defina a cota (mín. 10 GB ou ilimitada) e clique em **Conectar / Gerenciar Usuários** para vincular sua conta e sua equipe.
+
+---
+
+## 6. Onde Ficam os Dados (Volume `/data`)
+
+Todo o estado da aplicação e do banco fica isolado dentro do volume `/data`:
+
+| Caminho dentro do volume | O que contém |
 | :--- | :--- |
-| `/data/mariadb` | Arquivos físicos do banco de dados MariaDB |
-| `/data/storage` | Arquivos dos usuários (`blobs/`, `chunks/`, `avatars/`, `backups/`) |
-| `/data/config/.env` | Credenciais do banco e chaves (`APP_MASTER_KEY`, `JWT_SECRET`) geradas automaticamente na primeira inicialização (`chmod 600`) |
-| `/data/config/.lizzart-ed25519.pem` | Chave privada Ed25519 usada na assinatura dos tokens JWT |
+| `/data/mariadb` | Banco de dados MariaDB |
+| `/data/storage` | Arquivos enviados (`blobs/`), chunks temporários (`chunks/`), avatares e backups do DB (`backups/`) |
+| `/data/config/.env` | Credenciais do banco e chaves secretas geradas automaticamente (`chmod 600`) |
+| `/data/config/.lizzart-ed25519.pem` | Chave privada Ed25519 usada nos tokens JWT |
 
-### Variáveis de Ambiente do Container
+---
+
+## 7. Variáveis de Ambiente Opcionais
 
 | Variável | Padrão | Descrição |
 | :--- | :--- | :--- |
 | `PORT` | `3000` | Porta HTTP interna da aplicação |
-| `ORIGIN` | *(vazio)* | URL pública quando atrás de proxy reverso (ex.: `https://nuvem.suaempresa.com`) |
-| `FORCE_HTTPS` | *(vazio)* | Defina como `true` quando servido via HTTPS para forçar cookies `Secure` e HSTS |
-| `PERFORMANCE_MODE` | `optimized` | Perfil inicial: `ultra_optimized`, `optimized`, `fast` ou `ultra_fast` |
-| `SESSION_TTL_DAYS` | `7` | Validade do refresh token em dias |
+| `PERFORMANCE_MODE` | `optimized` | Perfil inicial: `ultra_optimized`, `optimized`, `fast` ou `ultra_fast` (também editável depois pelo Painel Admin) |
+| `ORIGIN` | *(vazio)* | URL pública completa quando atrás de proxy reverso (ex.: `https://nuvem.suaempresa.com`) |
+| `FORCE_HTTPS` | *(vazio)* | Defina `true` quando servido via HTTPS para ativar cookies `Secure` e HSTS |
+| `SESSION_TTL_DAYS` | `7` | Duração da sessão (refresh token) em dias |
 
-### Conexão com o Exterior (Proxy Reverso / HTTPS)
+---
 
-O container expõe apenas HTTP na porta `3000` (e mantém o MariaDB isolado em `127.0.0.1:3306`). Para acesso externo seguro com TLS/HTTPS, coloque um proxy reverso na frente (Nginx, Caddy, Traefik ou Cloudflare Tunnel).
+## 8. Expor para Internet / Domínio Próprio (HTTPS)
 
-Exemplo mínimo com **Caddy**:
+O container já entrega MariaDB + Aplicação juntos de forma segura (o MariaDB não é exposto para fora do container). Para publicar em um domínio externo com HTTPS, utilize um proxy reverso na frente da porta `3000` (Nginx, Caddy, Traefik ou Cloudflare Tunnel).
+
+### Exemplo com Caddy (HTTPS automático)
 
 ```caddyfile
 nuvem.seudominio.com {
@@ -85,14 +156,14 @@ nuvem.seudominio.com {
 }
 ```
 
-Exemplo de blocos recomendados no **Nginx** (garantindo uploads grandes e streaming sem buffering):
+### Exemplo com Nginx
 
 ```nginx
 server {
     listen 443 ssl http2;
     server_name nuvem.seudominio.com;
 
-    client_max_body_size 32M; # Chunks têm no máximo 20 MB
+    client_max_body_size 32M; # Os blocos de upload têm no máximo 20 MB
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -105,50 +176,38 @@ server {
 }
 ```
 
-> **Dica**: Ao usar proxy reverso HTTPS, defina `ORIGIN=https://nuvem.seudominio.com` e `FORCE_HTTPS=true` no `docker-compose.yml` ou no `docker run`.
+> Ao publicar em HTTPS, lembre-se de definir `-e ORIGIN=https://nuvem.seudominio.com -e FORCE_HTTPS=true`.
 
 ---
 
-## Opção 2: Instalação Local (Bun + MariaDB)
+## 9. Atualizar a Imagem Mantendo Todos os Dados
 
-### Pré-requisitos
-- **Bun** `1.x` (`https://bun.sh`)
-- **MariaDB** `10.6+` ou `11.x` em execução
+Como todos os arquivos, banco e chaves ficam no volume `lizzart_data`, atualizar para uma nova versão é seguro:
 
-### Passos
+```bash
+# 1. Importar a nova imagem recebida
+docker load -i lizzart-explorer-allinone.tar.gz
 
-1. **Instale as dependências:**
-   ```bash
-   make install
-   ```
+# 2. Parar e remover apenas o container antigo (NÃO apague o volume!)
+docker stop lizzart-explorer
+docker rm lizzart-explorer
 
-2. **Configure o arquivo `.env`:**
-   ```bash
-   cp .env.example .env
-   ```
-   Edite `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` e `STORAGE_ROOT`. As chaves `APP_MASTER_KEY` e `JWT_SECRET` são geradas automaticamente na primeira execução caso estejam vazias.
-
-3. **Inicialize o banco de dados (opcional — a aplicação também cria automaticamente no boot):**
-   ```bash
-   make db-init
-   ```
-
-4. **Execute:**
-   - **Modo Desenvolvimento** (`http://localhost:5173`):
-     ```bash
-     make dev
-     ```
-   - **Modo Produção** (`http://localhost:3000`):
-     ```bash
-     make start
-     ```
+# 3. Subir novamente apontando para o mesmo volume lizzart_data
+docker run -d \
+  --name lizzart-explorer \
+  -p 3000:3000 \
+  -v lizzart_data:/data \
+  --restart unless-stopped \
+  lizzart-explorer:latest
+```
 
 ---
 
-## Primeiro Acesso e Configuração Inicial (`/setup`)
+## 10. Comandos Úteis do Dia a Dia
 
-1. Abra **`http://localhost:3000`** (ou `5173` em dev).
-2. Como ainda não existe administrador no MariaDB, o sistema redirecionará automaticamente para **`/setup`**.
-3. Crie a conta **Administradora** inicial (usuário imutável, nome, sobrenome e senha com mínimo de 8 caracteres).
-4. Após o setup, o administrador entra **sem nenhuma workspace conectada**.
-5. Acesse **Painel Admin (`/admin`) → Workspaces**, crie sua primeira Workspace (definindo cota mínima de 10 GB ou ilimitada) e clique em **Conectar / Gerenciar Usuários** para vincular sua conta e outros membros.
+```bash
+docker ps                              # Ver status e saúde (healthy)
+docker logs -f lizzart-explorer        # Ver logs em tempo real
+docker stop lizzart-explorer           # Desligar com segurança (encerra App + MariaDB graciosamente)
+docker start lizzart-explorer          # Iniciar novamente
+```
