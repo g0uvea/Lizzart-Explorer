@@ -21,12 +21,31 @@ export interface PerformanceProfileRuntime {
 }
 
 export const PERFORMANCE_PROFILES: Record<PerformanceMode, PerformanceProfileRuntime> = {
+	legacy_mobile: {
+		mode: 'legacy_mobile',
+		label: 'Ultra-Leve (Android / Termux / SBC)',
+		tagline: 'Sobrevivência extrema para celulares antigos e TV Box',
+		description:
+			'Projetada especialmente para servidores improvisados em Android antigo (Termux/ARM), TV Box, Raspberry Pi Zero/3 ou máquinas com <512 MB de RAM livre. Minimiza conexões (2), reduz Argon2id para 12 MiB e usa chunks de 32 KB.',
+		dbConnectionLimit: 2,
+		dbQueueLimit: 20,
+		streamHighWaterMark: 32 * 1024, // 32 KB
+		maxConcurrentIo: 1,
+		authCacheTtlMs: 10_000,
+		metadataCacheMaxEntries: 60,
+		maxListLimit: 80,
+		argon2MemoryKiB: 12_288, // 12 MiB (prevents OOM killer on old Android kernels)
+		argon2TimeCost: 2,
+		clientMaxConcurrentTransfers: 1,
+		clientSearchDebounceMs: 550,
+		clientReducedEffects: true
+	},
 	ultra_optimized: {
 		mode: 'ultra_optimized',
 		label: 'Extremamente Otimizada',
 		tagline: 'Mínimo consumo de RAM e CPU',
 		description:
-			'Projetada para Home-NAS humilde, Raspberry Pi, Mini PC ou VPS de 512 MB–1 GB. Reduz buffers de I/O, limita paralelismo e desativa efeitos visuais pesados.',
+			'Projetada para Home-NAS humilde, Raspberry Pi 4, Mini PC ou VPS de 512 MB–1 GB. Reduz buffers de I/O, limita paralelismo e desativa efeitos visuais pesados.',
 		dbConnectionLimit: 4,
 		dbQueueLimit: 30,
 		streamHighWaterMark: 64 * 1024, // 64 KB
@@ -80,10 +99,10 @@ export const PERFORMANCE_PROFILES: Record<PerformanceMode, PerformanceProfileRun
 	},
 	ultra_fast: {
 		mode: 'ultra_fast',
-		label: 'Extremamente Rápida',
-		tagline: 'Throughput máximo para servidores dedicados',
+		label: 'Industrial / Extremamente Rápida',
+		tagline: 'Throughput máximo para servidores dedicados & data centers',
 		description:
-			'Desempenho máximo em NVMe / redes gigabit / grandes equipes. Pool amplo (40 conexões), buffers de 1 MB, até 16 fluxos I/O paralelos e cache quente.',
+			'Desempenho industrial em NVMe / redes 10GbE / grandes equipes. Pool amplo (40 conexões), buffers de 1 MB, até 16 fluxos I/O paralelos e cache quente.',
 		dbConnectionLimit: 40,
 		dbQueueLimit: 0,
 		streamHighWaterMark: 1024 * 1024, // 1 MB
@@ -101,6 +120,7 @@ export const PERFORMANCE_PROFILES: Record<PerformanceMode, PerformanceProfileRun
 
 export function isValidPerformanceMode(value: unknown): value is PerformanceMode {
 	return (
+		value === 'legacy_mobile' ||
 		value === 'ultra_optimized' ||
 		value === 'optimized' ||
 		value === 'fast' ||
@@ -108,9 +128,28 @@ export function isValidPerformanceMode(value: unknown): value is PerformanceMode
 	);
 }
 
+/**
+ * Auto-detects the safest default performance profile based on host RAM & CPU
+ * when PERFORMANCE_MODE is not explicitly set or set to "auto".
+ */
+export function detectHardwareDefaultMode(): PerformanceMode {
+	const totalRamMb = Math.round(os.totalmem() / (1024 * 1024));
+	const cores = os.cpus().length || 1;
+	if (totalRamMb <= 1200 || (totalRamMb <= 2048 && cores <= 2)) {
+		return 'legacy_mobile';
+	}
+	if (totalRamMb <= 2500) {
+		return 'ultra_optimized';
+	}
+	if (totalRamMb >= 16000 && cores >= 8) {
+		return 'fast';
+	}
+	return 'optimized';
+}
+
 let activeMode: PerformanceMode = isValidPerformanceMode(process.env.PERFORMANCE_MODE)
 	? process.env.PERFORMANCE_MODE
-	: 'optimized';
+	: detectHardwareDefaultMode();
 
 export function getActivePerformanceMode(): PerformanceMode {
 	return activeMode;
@@ -132,7 +171,15 @@ export function getClientPerformanceConfig(): PerformanceClientConfig {
 }
 
 export function listPerformanceProfiles(): PerformanceProfileInfo[] {
-	return (['ultra_optimized', 'optimized', 'fast', 'ultra_fast'] as PerformanceMode[]).map((m) => {
+	return (
+		[
+			'legacy_mobile',
+			'ultra_optimized',
+			'optimized',
+			'fast',
+			'ultra_fast'
+		] as PerformanceMode[]
+	).map((m) => {
 		const p = PERFORMANCE_PROFILES[m];
 		return {
 			mode: p.mode,

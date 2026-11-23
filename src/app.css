@@ -28,12 +28,32 @@ html[data-density='compact'] {
 	font-size: 13.75px;
 }
 
-/* Ultra-optimized hardware mode: removes GPU-heavy blurs and extra transitions */
+/* Ultra-optimized & Legacy/Mobile hardware mode: removes GPU-heavy blurs, neon filters, and extra transitions */
 html[data-perf='ultra_optimized'] *,
 html[data-perf='ultra_optimized'] *::before,
-html[data-perf='ultra_optimized'] *::after {
+html[data-perf='ultra_optimized'] *::after,
+html[data-perf='legacy_mobile'] *,
+html[data-perf='legacy_mobile'] *::before,
+html[data-perf='legacy_mobile'] *::after {
 	backdrop-filter: none !important;
 	-webkit-backdrop-filter: none !important;
+	filter: none !important;
+}
+
+/* Global GPU compositing optimization: avoid expensive real-time backdrop-filter & blur-3xl passes while preserving sleek dark theme */
+.backdrop-blur-xs,
+.backdrop-blur-sm,
+.backdrop-blur-md,
+.backdrop-blur-lg,
+.backdrop-blur-xl {
+	backdrop-filter: none !important;
+	-webkit-backdrop-filter: none !important;
+}
+
+.blur-3xl,
+.blur-2xl {
+	filter: none !important;
+	background: radial-gradient(circle, rgb(var(--accent-rgb) / 0.14) 0%, transparent 70%) !important;
 }
 
 html,
