@@ -41,7 +41,8 @@
 		Check,
 		MoreVertical,
 		Layers,
-		Shield
+		Shield,
+		Play
 	} from 'lucide-svelte';
 
 	let { data } = $props();
@@ -120,6 +121,13 @@
 
 	let showNewFolderModal = $state(false);
 	let newFolderName = $state('');
+
+	let failedThumbs = $state<Set<string>>(new Set());
+	function markThumbFailed(id: string) {
+		const next = new Set(failedThumbs);
+		next.add(id);
+		failedThumbs = next;
+	}
 
 	let renameNode = $state<StorageNode | null>(null);
 	let renameValue = $state('');
@@ -1034,15 +1042,20 @@
 					{/if}
 				</div>
 			{:else if displayMode === 'grid'}
-				<div class="grid grid-cols-2 gap-2.5 pb-6 sm:gap-4 md:grid-cols-3 xl:grid-cols-4">
+				<div class="grid grid-cols-2 gap-3 pb-6 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
 					{#each nodes as node (node.id)}
 						{@const isSelected = selectedIds.has(node.id)}
 						{@const isDragging = dragStore.draggingIds.has(node.id)}
 						{@const isDropTarget = dropHoverFolderId === node.id}
-						{@const isImage =
+						{@const cat =
+							node.type === 'file'
+								? getFileCategory('file', node.mime_type, node.name)
+								: 'folder'}
+						{@const hasVisualThumb =
 							node.type === 'file' &&
-							getFileCategory('file', node.mime_type, node.name) === 'image' &&
-							!node.is_trashed}
+							!node.is_trashed &&
+							(cat === 'image' || cat === 'video') &&
+							!failedThumbs.has(node.id)}
 						<div
 							data-node-id={node.id}
 							draggable={!node.is_trashed && (node.permission === 'owner' || node.permission === 'editor')}
@@ -1069,16 +1082,25 @@
 									? 'border-accent-400 bg-[#18273e] shadow-xl ring-2 ring-accent-500/35'
 									: 'border-[#1f2d45] bg-[#131c2e] hover:border-accent-500/40 hover:bg-[#172238] hover:shadow-xl hover:shadow-black/30'}"
 						>
-							<div class="relative flex h-24 items-center justify-center overflow-hidden bg-[#0e1525] sm:h-32">
-								{#if isImage}
+							<!-- Uniform Square Thumbnail Area (1:1 aspect-square for all cards: Videos, Photos, Folders & Files) -->
+							<div class="relative flex aspect-square w-full items-center justify-center overflow-hidden bg-[#0e1525]">
+								{#if hasVisualThumb}
 									<img
-										src="/api/files/{node.id}/content?v={encodeURIComponent(node.updated_at)}"
+										src="/api/files/{node.id}/thumb?v={encodeURIComponent(node.updated_at)}"
 										alt={node.name}
 										loading="lazy"
 										decoding="async"
 										draggable="false"
+										onerror={() => markThumbFailed(node.id)}
 										class="h-full w-full object-cover transition duration-300 group-hover:scale-105"
 									/>
+									{#if cat === 'video'}
+										<div class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/25 transition group-hover:bg-black/35">
+											<div class="flex h-10 w-10 items-center justify-center rounded-full bg-black/65 text-white shadow-lg ring-1 ring-white/20">
+												<Play class="ml-0.5 h-4 w-4 fill-white" />
+											</div>
+										</div>
+									{/if}
 								{:else}
 									<FileIcon type={node.type} mime={node.mime_type} name={node.name} size="lg" />
 								{/if}

@@ -86,7 +86,7 @@ export async function migrateStorageDirectory(
 ): Promise<number> {
 	if (path.resolve(oldResolved) === path.resolve(newResolved)) return 0;
 	let total = 0;
-	for (const sub of ['blobs', 'avatars', 'backups']) {
+	for (const sub of ['blobs', 'avatars', 'backups', 'thumbs']) {
 		const src = path.join(oldResolved, sub);
 		const dst = path.join(newResolved, sub);
 		total += await copyDirRecursive(src, dst);
@@ -99,7 +99,8 @@ export async function ensureStorageDir(): Promise<void> {
 		fsp.mkdir(path.join(storageRootResolved, 'blobs'), { recursive: true }),
 		fsp.mkdir(path.join(storageRootResolved, 'chunks'), { recursive: true }),
 		fsp.mkdir(path.join(storageRootResolved, 'avatars'), { recursive: true }),
-		fsp.mkdir(path.join(storageRootResolved, 'backups'), { recursive: true })
+		fsp.mkdir(path.join(storageRootResolved, 'backups'), { recursive: true }),
+		fsp.mkdir(path.join(storageRootResolved, 'thumbs'), { recursive: true })
 	]);
 }
 
