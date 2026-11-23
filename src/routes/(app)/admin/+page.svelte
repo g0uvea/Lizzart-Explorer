@@ -13,6 +13,7 @@
 		WorkspaceRole
 	} from '$lib/types';
 	import { toast } from '$lib/stores/toast.svelte';
+	import { SUPPORTED_COUNTRIES, SUPPORTED_LANGUAGES } from '$lib/stores/i18n.svelte';
 	import { formatBytes, formatDate, getInitials } from '$lib/utils';
 	import {
 		Users,
@@ -73,7 +74,11 @@
 		max_upload_mb: 10240,
 		performance_mode: 'optimized',
 		auto_backup_interval: 'off',
-		backup_retention_count: 10
+		backup_retention_count: 10,
+		default_language: 'en',
+		default_country: 'US',
+		plugin_mc_servers: true,
+		plugin_notes: true
 	});
 
 	// Performance profiles & telemetry
@@ -718,7 +723,9 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					default_quota_gb: settings.default_quota_gb,
-					max_upload_mb: settings.max_upload_mb
+					max_upload_mb: settings.max_upload_mb,
+					default_language: settings.default_language,
+					default_country: settings.default_country
 				})
 			});
 			const d = await res.json();
@@ -1556,7 +1563,7 @@
 					</p>
 				</div>
 
-				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
 					<div>
 						<label for="defq" class="mb-1.5 block text-xs font-medium text-slate-400">
 							Cota padrão p/ novas workspaces (GB — mín. 10)
@@ -1580,6 +1587,34 @@
 							bind:value={settings.max_upload_mb}
 							class="w-full rounded-xl border border-[#233047] bg-[#0b101b] px-3.5 py-2.5 text-sm text-white outline-none focus:border-accent-500"
 						/>
+					</div>
+					<div>
+						<label for="deflang" class="mb-1.5 block text-xs font-medium text-slate-400">
+							Idioma Base (Novos Usuários)
+						</label>
+						<select
+							id="deflang"
+							bind:value={settings.default_language}
+							class="w-full rounded-xl border border-[#233047] bg-[#0b101b] px-3.5 py-2.5 text-sm text-white outline-none focus:border-accent-500"
+						>
+							{#each SUPPORTED_LANGUAGES as l (l.code)}
+								<option value={l.code}>{l.nativeName} ({l.name})</option>
+							{/each}
+						</select>
+					</div>
+					<div>
+						<label for="defcountry" class="mb-1.5 block text-xs font-medium text-slate-400">
+							País Base (Novos Usuários)
+						</label>
+						<select
+							id="defcountry"
+							bind:value={settings.default_country}
+							class="w-full rounded-xl border border-[#233047] bg-[#0b101b] px-3.5 py-2.5 text-sm text-white outline-none focus:border-accent-500"
+						>
+							{#each SUPPORTED_COUNTRIES as c (c.code)}
+								<option value={c.code}>{c.name[settings.default_language || 'en'] || c.name.en} ({c.code})</option>
+							{/each}
+						</select>
 					</div>
 				</div>
 

@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { goto, invalidateAll } from '$app/navigation';
 	import { toast } from '$lib/stores/toast.svelte';
-	import { HardDrive, ShieldCheck, User, Lock, ArrowRight, Sparkles } from 'lucide-svelte';
+	import { i18n, SUPPORTED_COUNTRIES, SUPPORTED_LANGUAGES } from '$lib/stores/i18n.svelte';
+	import type { AppLanguage } from '$lib/types';
+	import { HardDrive, ShieldCheck, User, Lock, ArrowRight, Sparkles, Globe } from 'lucide-svelte';
 
 	let username = $state('');
 	let firstName = $state('');
@@ -16,7 +18,7 @@
 		errorMsg = '';
 
 		if (password !== confirmPassword) {
-			errorMsg = 'As senhas não coincidem.';
+			errorMsg = i18n.t('setup.password_mismatch');
 			return;
 		}
 
@@ -29,19 +31,21 @@
 					username,
 					first_name: firstName,
 					last_name: lastName,
-					password
+					password,
+					language: i18n.language,
+					country: i18n.country
 				})
 			});
 			const data = await res.json();
 			if (!res.ok) {
-				errorMsg = data.error || 'Falha ao criar conta administradora.';
+				errorMsg = data.error || 'Failed to create administrator account.';
 				return;
 			}
-			toast.success(`Administrador @${data.username} configurado com sucesso!`);
+			toast.success(`Admin @${data.username} configured!`);
 			await invalidateAll();
 			await goto('/');
 		} catch {
-			errorMsg = 'Erro de conexão com o servidor.';
+			errorMsg = 'Connection error with the server.';
 		} finally {
 			loading = false;
 		}
@@ -49,7 +53,7 @@
 </script>
 
 <svelte:head>
-	<title>Configuração Inicial — Lizzart Explorer</title>
+	<title>{i18n.t('setup.title')} — Lizzart Explorer</title>
 </svelte:head>
 
 <div class="relative flex min-h-dvh items-center justify-center overflow-hidden bg-[#0b101b] px-4 py-10">
@@ -61,15 +65,15 @@
 				<HardDrive class="h-7 w-7 text-white" />
 			</div>
 			<span class="mb-2 inline-flex items-center gap-1.5 rounded-full border border-accent-500/30 bg-accent-500/10 px-3 py-1 text-xs font-semibold text-accent-300">
-				<Sparkles class="h-3.5 w-3.5" /> Primeira Inicialização
+				<Sparkles class="h-3.5 w-3.5" /> {i18n.t('setup.badge')}
 			</span>
-			<h1 class="text-2xl font-bold tracking-tight text-white">Criar Conta Administradora</h1>
+			<h1 class="text-2xl font-bold tracking-tight text-white">{i18n.t('setup.title')}</h1>
 			<p class="mt-1.5 max-w-md text-sm text-slate-400">
-				Nenhuma conta administradora foi encontrada no banco MariaDB. Configure o administrador principal — futuras contas de usuários serão criadas somente pelo Painel Admin.
+				{i18n.t('setup.subtitle')}
 			</p>
 		</div>
 
-		<div class="rounded-2xl border border-[#1f2d45] bg-[#131c2e]/95 p-5 shadow-2xl backdrop-blur-xl sm:p-7">
+		<div class="rounded-2xl border border-[#1f2d45] bg-[#131c2e]/95 p-5 shadow-2xl sm:p-7">
 			{#if errorMsg}
 				<div class="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
 					{errorMsg}
@@ -77,9 +81,52 @@
 			{/if}
 
 			<form onsubmit={handleSetup} class="space-y-4">
+				<!-- Base Application Language & Country -->
+				<div class="rounded-xl border border-[#233047] bg-[#0e1525] p-3.5">
+					<div class="mb-2.5 flex items-center gap-2 text-xs font-semibold text-accent-300">
+						<Globe class="h-4 w-4 text-accent-400" />
+						<span>{i18n.t('setup.language')} & {i18n.t('setup.country')}</span>
+					</div>
+					<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+						<div>
+							<label for="s-lang" class="mb-1 block text-[11px] font-medium uppercase tracking-wider text-slate-400">
+								{i18n.t('setup.language')}
+							</label>
+							<select
+								id="s-lang"
+								value={i18n.language}
+								onchange={(e) => i18n.setLocale(e.currentTarget.value as AppLanguage, i18n.country)}
+								class="w-full rounded-xl border border-[#233047] bg-[#0b101b] px-3 py-2 text-sm text-white outline-none focus:border-accent-500"
+							>
+								{#each SUPPORTED_LANGUAGES as lang (lang.code)}
+									<option value={lang.code}>{lang.nativeName} ({lang.name})</option>
+								{/each}
+							</select>
+						</div>
+						<div>
+							<label for="s-country" class="mb-1 block text-[11px] font-medium uppercase tracking-wider text-slate-400">
+								{i18n.t('setup.country')}
+							</label>
+							<select
+								id="s-country"
+								value={i18n.country}
+								onchange={(e) => i18n.setLocale(i18n.language, e.currentTarget.value)}
+								class="w-full rounded-xl border border-[#233047] bg-[#0b101b] px-3 py-2 text-sm text-white outline-none focus:border-accent-500"
+							>
+								{#each SUPPORTED_COUNTRIES as c (c.code)}
+									<option value={c.code}>{c.name[i18n.language] || c.name.en} ({c.code})</option>
+								{/each}
+							</select>
+						</div>
+					</div>
+					<p class="mt-2 text-[11px] text-slate-400">
+						{i18n.t('setup.locale_hint')}
+					</p>
+				</div>
+
 				<div>
 					<label for="s-user" class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">
-						Usuário (imutável após criado)
+						{i18n.t('setup.username_label')}
 					</label>
 					<div class="relative">
 						<span class="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 font-mono text-sm text-accent-400">@</span>
@@ -90,19 +137,19 @@
 							minlength={3}
 							maxlength={32}
 							bind:value={username}
-							placeholder="ex: joaovitor"
+							placeholder="admin"
 							class="w-full rounded-xl border border-[#233047] bg-[#0b101b] py-2.5 pr-4 pl-8 font-mono text-sm text-white placeholder-slate-500 outline-none focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20"
 						/>
 					</div>
 					<p class="mt-1 text-[11px] text-slate-500">
-						Use apenas letras minúsculas, números, ponto, hífen ou underline.
+						{i18n.t('setup.username_hint')}
 					</p>
 				</div>
 
 				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<div>
 						<label for="s-fn" class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">
-							Nome
+							{i18n.t('setup.first_name')}
 						</label>
 						<div class="relative">
 							<User class="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-500" />
@@ -119,7 +166,7 @@
 					</div>
 					<div>
 						<label for="s-ln" class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">
-							Sobrenome
+							{i18n.t('setup.last_name')}
 						</label>
 						<input
 							id="s-ln"
@@ -136,7 +183,7 @@
 				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<div>
 						<label for="s-pw" class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">
-							Senha
+							{i18n.t('setup.password')}
 						</label>
 						<div class="relative">
 							<Lock class="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-500" />
@@ -146,14 +193,14 @@
 								required
 								minlength={8}
 								bind:value={password}
-								placeholder="Mín. 8 caracteres"
+								placeholder={i18n.t('setup.password_placeholder')}
 								class="w-full rounded-xl border border-[#233047] bg-[#0b101b] py-2.5 pr-4 pl-10 text-sm text-white placeholder-slate-500 outline-none focus:border-accent-500"
 							/>
 						</div>
 					</div>
 					<div>
 						<label for="s-pw2" class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">
-							Confirmar Senha
+							{i18n.t('setup.confirm_password')}
 						</label>
 						<input
 							id="s-pw2"
@@ -161,7 +208,7 @@
 							required
 							minlength={8}
 							bind:value={confirmPassword}
-							placeholder="Repita a senha"
+							placeholder={i18n.t('setup.confirm_placeholder')}
 							class="w-full rounded-xl border border-[#233047] bg-[#0b101b] px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-accent-500"
 						/>
 					</div>
@@ -169,7 +216,7 @@
 
 				<div class="flex items-center gap-2 rounded-xl border border-accent-500/20 bg-accent-500/10 px-3.5 py-2.5 text-xs text-accent-200">
 					<ShieldCheck class="h-4 w-4 shrink-0 text-accent-400" />
-					<span>Conta Administradora inicial (sem workspace vinculada). Crie e conecte workspaces pelo Painel Admin.</span>
+					<span>{i18n.t('setup.info_banner')}</span>
 				</div>
 
 				<button
@@ -177,7 +224,7 @@
 					disabled={loading}
 					class="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-accent-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-accent-600/25 transition hover:bg-accent-500 disabled:opacity-50"
 				>
-					<span>{loading ? 'Configurando...' : 'Concluir Setup e Entrar'}</span>
+					<span>{loading ? i18n.t('setup.submitting') : i18n.t('setup.submit')}</span>
 					<ArrowRight class="h-4 w-4" />
 				</button>
 			</form>

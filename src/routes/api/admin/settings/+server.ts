@@ -4,7 +4,9 @@ import { applyPoolPerformanceLimits, getPool } from '$lib/server/db';
 import {
 	invalidateSettingsCache,
 	logAudit,
-	MIN_WORKSPACE_QUOTA_GB
+	MIN_WORKSPACE_QUOTA_GB,
+	normalizeAppLanguage,
+	normalizeCountryCode
 } from '$lib/server/auth';
 import { isValidPerformanceMode, setActivePerformanceMode } from '$lib/server/performance';
 
@@ -52,6 +54,12 @@ export const PATCH: RequestHandler = async ({ locals, request, getClientAddress 
 		if (!Number.isNaN(val)) {
 			pairs.push(['backup_retention_count', String(val)]);
 		}
+	}
+	if (body.default_language !== undefined) {
+		pairs.push(['default_language', normalizeAppLanguage(body.default_language)]);
+	}
+	if (body.default_country !== undefined) {
+		pairs.push(['default_country', normalizeCountryCode(body.default_country)]);
 	}
 
 	for (const [k, v] of pairs) {

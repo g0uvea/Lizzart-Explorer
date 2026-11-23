@@ -4,7 +4,14 @@ import type { RowDataPacket } from 'mysql2/promise';
 import crypto from 'node:crypto';
 import { getPool } from '$lib/server/db';
 import { hashPassword } from '$lib/server/crypto';
-import { isValidUsername, logAudit, normalizeUsername } from '$lib/server/auth';
+import {
+	getSystemSettings,
+	isValidUsername,
+	logAudit,
+	normalizeAppLanguage,
+	normalizeCountryCode,
+	normalizeUsername
+} from '$lib/server/auth';
 
 const COLORS = ['#10b981', '#0ea5e9', '#6366f1', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6'];
 
@@ -45,12 +52,15 @@ export const POST: RequestHandler = async ({ locals, request, getClientAddress }
 	const id = crypto.randomUUID();
 	const hash = await hashPassword(password);
 	const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+	const sys = await getSystemSettings();
+	const lang = body?.language ? normalizeAppLanguage(body.language) : sys.default_language;
+	const country = body?.country ? normalizeCountryCode(body.country) : sys.default_country;
 
-	// Accounts start decoupled from workspaces — Admin connects them via Workspaces management
+	// Accounts start decoupled from workspaces and inherit the system's base Language & Country
 	await db.query(
-		`INSERT INTO users (id, username, first_name, last_name, password_hash, role, is_active, avatar_color, accent_color, layout_density)
-		 VALUES (?, ?, ?, ?, ?, ?, 1, ?, '#10b981', 'normal')`,
-		[id, username, firstName, lastName, hash, role, color]
+		`INSERT INTO users (id, username, first_name, last_name, password_hash, role, is_active, avatar_color, accent_color, layout_density, language, country)
+		 VALUES (?, ?, ?, ?, ?, ?, 1, ?, '#10b981', 'normal', ?, ?)`,
+		[id, username, firstName, lastName, hash, role, color, lang, country]
 	);
 
 	await logAudit({

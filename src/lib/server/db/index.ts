@@ -202,6 +202,8 @@ async function initializeDatabase(): Promise<void> {
 			default_view_mode ENUM('grid', 'list') NOT NULL DEFAULT 'grid',
 			default_sort_by ENUM('name', 'date', 'size') NOT NULL DEFAULT 'name',
 			default_sort_dir ENUM('asc', 'desc') NOT NULL DEFAULT 'asc',
+			language VARCHAR(8) NOT NULL DEFAULT 'en',
+			country VARCHAR(8) NOT NULL DEFAULT 'US',
 			totp_secret VARCHAR(512) NULL,
 			totp_enabled TINYINT(1) NOT NULL DEFAULT 0,
 			totp_last_step BIGINT NULL,
@@ -220,6 +222,10 @@ async function initializeDatabase(): Promise<void> {
 		await safeAlter(db, 'ALTER TABLE users ADD COLUMN totp_last_step BIGINT NULL AFTER totp_enabled');
 		await safeAlter(db, 'ALTER TABLE users ADD COLUMN failed_login_count INT NOT NULL DEFAULT 0 AFTER totp_last_step');
 		await safeAlter(db, 'ALTER TABLE users ADD COLUMN locked_until DATETIME NULL AFTER failed_login_count');
+	}
+	if (!(await columnExists(db, 'users', 'language'))) {
+		await safeAlter(db, "ALTER TABLE users ADD COLUMN language VARCHAR(8) NOT NULL DEFAULT 'en' AFTER default_sort_dir");
+		await safeAlter(db, "ALTER TABLE users ADD COLUMN country VARCHAR(8) NOT NULL DEFAULT 'US' AFTER language");
 	}
 
 	// 2. Sessions (EdDSA JWT + HMAC-SHA512 refresh token rotation & reuse detection)
@@ -311,6 +317,7 @@ async function initializeDatabase(): Promise<void> {
 			size_bytes BIGINT NOT NULL DEFAULT 0,
 			disk_path VARCHAR(512) NULL,
 			sha256 CHAR(64) NULL,
+			is_note TINYINT(1) NOT NULL DEFAULT 0,
 			is_starred TINYINT(1) NOT NULL DEFAULT 0,
 			is_trashed TINYINT(1) NOT NULL DEFAULT 0,
 			trashed_at DATETIME NULL,
@@ -370,6 +377,11 @@ async function initializeDatabase(): Promise<void> {
 		await safeAlter(db, 'ALTER TABLE storage_nodes ADD KEY idx_nodes_ws_star (workspace_id, is_starred, is_trashed)');
 		await safeAlter(db, 'ALTER TABLE storage_nodes ADD CONSTRAINT fk_nodes_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces (id) ON DELETE CASCADE');
 		await safeAlter(db, 'ALTER TABLE storage_nodes ADD CONSTRAINT fk_nodes_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL');
+	}
+
+	if (!(await columnExists(db, 'storage_nodes', 'is_note'))) {
+		await safeAlter(db, 'ALTER TABLE storage_nodes ADD COLUMN is_note TINYINT(1) NOT NULL DEFAULT 0 AFTER sha256');
+		await safeAlter(db, 'ALTER TABLE storage_nodes ADD KEY idx_nodes_ws_note (workspace_id, created_by, is_note, is_trashed)');
 	}
 
 	// 5. Upload Sessions (resumable chunks scoped to workspace)
@@ -519,7 +531,11 @@ async function initializeDatabase(): Promise<void> {
 		['storage_root', process.env.STORAGE_ROOT || './storage'],
 		['performance_mode', 'optimized'],
 		['auto_backup_interval', 'off'],
-		['backup_retention_count', '10']
+		['backup_retention_count', '10'],
+		['default_language', 'en'],
+		['default_country', 'US'],
+		['plugin_mc_servers', '1'],
+		['plugin_notes', '1']
 	];
 	for (const [key, value] of defaultSettings) {
 		await db.query(

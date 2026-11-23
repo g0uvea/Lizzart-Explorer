@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto, invalidateAll } from '$app/navigation';
 	import { toast } from '$lib/stores/toast.svelte';
+	import { i18n } from '$lib/stores/i18n.svelte';
 	import { HardDrive, Lock, ArrowRight, ShieldCheck, KeyRound } from 'lucide-svelte';
 
 	let username = $state('');
@@ -67,11 +68,11 @@
 			</div>
 			<h1 class="text-2xl font-bold tracking-tight text-white">Lizzart Explorer</h1>
 			<p class="mt-1 text-xs text-slate-400 sm:text-sm">
-				Armazenamento em nuvem privado & workspaces
+				{i18n.t('login.subtitle')}
 			</p>
 		</div>
 
-		<div class="rounded-2xl border border-[#1f2d45] bg-[#131c2e]/90 p-5 shadow-2xl backdrop-blur-xl sm:p-7">
+		<div class="rounded-2xl border border-[#1f2d45] bg-[#131c2e]/90 p-5 shadow-2xl sm:p-7">
 			{#if errorMsg}
 				<div class="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-200 sm:text-sm">
 					{errorMsg}
@@ -82,7 +83,7 @@
 				{#if !requires2fa}
 					<div>
 						<label for="username" class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">
-							Usuário
+							{i18n.t('login.username')}
 						</label>
 						<div class="relative">
 							<span class="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 font-mono text-sm text-accent-400">@</span>
@@ -92,7 +93,7 @@
 								required
 								autocomplete="username"
 								bind:value={username}
-								placeholder="seu_usuario"
+								placeholder="username"
 								class="w-full rounded-xl border border-[#233047] bg-[#0b101b] py-2.5 pr-4 pl-8 font-mono text-sm text-white placeholder-slate-500 outline-none transition focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20"
 							/>
 						</div>
@@ -100,7 +101,7 @@
 
 					<div>
 						<label for="password" class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">
-							Senha
+							{i18n.t('login.password')}
 						</label>
 						<div class="relative">
 							<Lock class="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-500" />
@@ -118,15 +119,15 @@
 				{:else}
 					<div class="rounded-xl border border-accent-500/30 bg-accent-500/10 p-4 text-center">
 						<KeyRound class="mx-auto mb-2 h-8 w-8 text-accent-400" />
-						<h2 class="text-sm font-semibold text-white">Verificação em 2 Etapas (2FA)</h2>
+						<h2 class="text-sm font-semibold text-white">{i18n.t('login.2fa_title')}</h2>
 						<p class="mt-1 text-xs text-slate-300">
-							Digite o código de 6 dígitos do seu autenticador para <strong class="font-mono">@{username}</strong>.
+							{i18n.t('login.2fa_subtitle')} <strong class="font-mono">@{username}</strong>.
 						</p>
 					</div>
 
 					<div>
 						<label for="totp" class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">
-							Código de 6 dígitos
+							{i18n.t('login.2fa_code')}
 						</label>
 						<input
 							id="totp"
@@ -150,7 +151,7 @@
 						}}
 						class="text-xs text-slate-400 hover:text-white"
 					>
-						← Voltar para usuário e senha
+						{i18n.t('login.back')}
 					</button>
 				{/if}
 
@@ -159,14 +160,14 @@
 					disabled={loading}
 					class="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-accent-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-accent-600/25 transition hover:bg-accent-500 disabled:opacity-50"
 				>
-					<span>{loading ? 'Verificando...' : requires2fa ? 'Confirmar Código 2FA' : 'Acessar Nuvem'}</span>
+					<span>{loading ? i18n.t('login.submitting') : requires2fa ? i18n.t('login.confirm_2fa') : i18n.t('login.submit')}</span>
 					<ArrowRight class="h-4 w-4" />
 				</button>
 			</form>
 
 			<div class="mt-6 flex items-center gap-2 rounded-xl border border-[#233047] bg-[#0b101b]/70 px-3.5 py-2.5 text-xs text-slate-400">
 				<ShieldCheck class="h-4 w-4 shrink-0 text-accent-400" />
-				<span>Protegido por EdDSA (Ed25519), Argon2id, AES-256-GCM e rotação anti-reuso.</span>
+				<span>{i18n.t('login.security_footer')}</span>
 			</div>
 		</div>
 	</div>

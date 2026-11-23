@@ -1,7 +1,13 @@
 export type UserRole = 'admin' | 'user';
 export type WorkspaceRole = 'manager' | 'editor' | 'viewer';
-export type PerformanceMode = 'ultra_optimized' | 'optimized' | 'fast' | 'ultra_fast';
+export type PerformanceMode =
+	| 'legacy_mobile'
+	| 'ultra_optimized'
+	| 'optimized'
+	| 'fast'
+	| 'ultra_fast';
 export type AutoBackupInterval = 'off' | 'daily' | 'weekly';
+export type AppLanguage = 'en' | 'pt' | 'es';
 
 export type LayoutDensity = 'normal' | 'compact';
 export type ViewMode = 'grid' | 'list';
@@ -66,6 +72,8 @@ export interface SafeUser {
 	default_sort_by: SortBy;
 	default_sort_dir: SortDir;
 	totp_enabled: boolean;
+	language: AppLanguage;
+	country: string;
 	created_at: string;
 	workspaces?: WorkspaceSummary[];
 }
@@ -143,6 +151,34 @@ export interface SystemSettings {
 	performance_mode: PerformanceMode;
 	auto_backup_interval: AutoBackupInterval;
 	backup_retention_count: number;
+	default_language: AppLanguage;
+	default_country: string;
+	plugin_mc_servers: boolean;
+	plugin_notes: boolean;
+}
+
+export interface PluginState {
+	mc_servers: boolean;
+	notes: boolean;
+}
+
+export interface NoteRecord {
+	id: string;
+	workspace_id: string;
+	workspace_name?: string;
+	created_by: string | null;
+	created_by_name?: string;
+	created_by_username?: string;
+	title: string;
+	name: string;
+	content?: string;
+	size_bytes: number;
+	is_starred: boolean;
+	permission: 'owner' | 'editor' | 'viewer';
+	share_count: number;
+	link_count: number;
+	created_at: string;
+	updated_at: string;
 }
 
 export interface PerformanceClientConfig {

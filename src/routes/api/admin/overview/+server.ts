@@ -43,7 +43,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 			db.query<RowDataPacket[]>(
 				`SELECT id, username, first_name, last_name, role, is_active,
 				        avatar_color, avatar_path, accent_color, layout_density,
-				        default_view_mode, default_sort_by, default_sort_dir, totp_enabled, created_at
+				        default_view_mode, default_sort_by, default_sort_dir, language, country, totp_enabled, created_at
 				 FROM users ORDER BY created_at DESC`
 			),
 			listAllWorkspacesAdmin(),

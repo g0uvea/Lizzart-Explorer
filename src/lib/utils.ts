@@ -1,5 +1,7 @@
+import { i18n } from '$lib/stores/i18n.svelte';
+
 export function formatBytes(bytes: number): string {
-	if (bytes < 0) return 'Ilimitado';
+	if (bytes < 0) return i18n.t('explorer.unlimited');
 	if (bytes === 0) return '0 B';
 	const units = ['B', 'KB', 'MB', 'GB', 'TB'];
 	const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
@@ -11,13 +13,24 @@ export function formatDate(iso: string | null | undefined): string {
 	if (!iso) return '—';
 	const d = new Date(iso);
 	if (Number.isNaN(d.getTime())) return '—';
-	return new Intl.DateTimeFormat('pt-BR', {
-		day: '2-digit',
-		month: 'short',
-		year: 'numeric',
-		hour: '2-digit',
-		minute: '2-digit'
-	}).format(d);
+	const localeTag = i18n.bcp47 || 'en-US';
+	try {
+		return new Intl.DateTimeFormat(localeTag, {
+			day: '2-digit',
+			month: 'short',
+			year: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		}).format(d);
+	} catch {
+		return new Intl.DateTimeFormat('en-US', {
+			day: '2-digit',
+			month: 'short',
+			year: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		}).format(d);
+	}
 }
 
 export type FileCategory =

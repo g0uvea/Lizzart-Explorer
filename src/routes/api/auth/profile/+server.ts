@@ -7,6 +7,8 @@ import {
 	invalidateUserAuthCache,
 	logAudit,
 	mapUserRow,
+	normalizeAppLanguage,
+	normalizeCountryCode,
 	revokeOtherUserSessions
 } from '$lib/server/auth';
 
@@ -79,6 +81,14 @@ export const PATCH: RequestHandler = async ({ locals, request, getClientAddress 
 		body.default_sort_dir === 'asc' || body.default_sort_dir === 'desc'
 			? body.default_sort_dir
 			: locals.user.default_sort_dir;
+	const language =
+		body.language !== undefined
+			? normalizeAppLanguage(body.language)
+			: locals.user.language;
+	const country =
+		body.country !== undefined
+			? normalizeCountryCode(body.country)
+			: locals.user.country;
 
 	if (firstName.length < 2 || lastName.length < 2) {
 		return json({ error: 'Nome e Sobrenome devem ter pelo menos 2 caracteres.' }, { status: 400 });
@@ -87,7 +97,8 @@ export const PATCH: RequestHandler = async ({ locals, request, getClientAddress 
 	await db.query(
 		`UPDATE users
 		 SET first_name = ?, last_name = ?, avatar_color = ?, accent_color = ?,
-		     layout_density = ?, default_view_mode = ?, default_sort_by = ?, default_sort_dir = ?
+		     layout_density = ?, default_view_mode = ?, default_sort_by = ?, default_sort_dir = ?,
+		     language = ?, country = ?
 		 WHERE id = ?`,
 		[
 			firstName,
@@ -98,6 +109,8 @@ export const PATCH: RequestHandler = async ({ locals, request, getClientAddress 
 			defaultViewMode,
 			defaultSortBy,
 			defaultSortDir,
+			language,
+			country,
 			locals.user.id
 		]
 	);
@@ -107,7 +120,7 @@ export const PATCH: RequestHandler = async ({ locals, request, getClientAddress 
 	const [updated] = await db.query<RowDataPacket[]>(
 		`SELECT id, username, first_name, last_name, role, is_active,
 		        avatar_color, avatar_path, accent_color, layout_density,
-		        default_view_mode, default_sort_by, default_sort_dir, totp_enabled, created_at
+		        default_view_mode, default_sort_by, default_sort_dir, language, country, totp_enabled, created_at
 		 FROM users WHERE id = ?`,
 		[locals.user.id]
 	);

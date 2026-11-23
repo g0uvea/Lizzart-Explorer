@@ -15,7 +15,20 @@ import {
 	runtimeCache
 } from '$lib/server/performance';
 import { describeUserAgent } from '$lib/server/security';
-import type { AutoBackupInterval, SafeUser, SystemSettings } from '$lib/types';
+import type { AppLanguage, AutoBackupInterval, SafeUser, SystemSettings } from '$lib/types';
+
+export function normalizeAppLanguage(raw: unknown): AppLanguage {
+	if (raw === 'pt' || raw === 'es' || raw === 'en') return raw;
+	return 'en';
+}
+
+export function normalizeCountryCode(raw: unknown): string {
+	const code = String(raw || '')
+		.trim()
+		.toUpperCase()
+		.replace(/[^A-Z]/g, '');
+	return code.length === 2 ? code : 'US';
+}
 
 export const ACCESS_COOKIE_NAME = 'lizzart_access';
 export const REFRESH_COOKIE_NAME = 'lizzart_refresh';
@@ -59,6 +72,8 @@ export function mapUserRow(row: RowDataPacket): SafeUser {
 				: 'name',
 		default_sort_dir: row.default_sort_dir === 'desc' ? 'desc' : 'asc',
 		totp_enabled: Boolean(row.totp_enabled),
+		language: normalizeAppLanguage(row.language),
+		country: normalizeCountryCode(row.country),
 		created_at:
 			row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at)
 	};
@@ -67,7 +82,7 @@ export function mapUserRow(row: RowDataPacket): SafeUser {
 const USER_SELECT_COLS = `
 	u.id, u.username, u.first_name, u.last_name, u.role,
 	u.is_active, u.avatar_color, u.avatar_path, u.accent_color, u.layout_density,
-	u.default_view_mode, u.default_sort_by, u.default_sort_dir, u.totp_enabled, u.created_at
+	u.default_view_mode, u.default_sort_by, u.default_sort_dir, u.language, u.country, u.totp_enabled, u.created_at
 `;
 
 export function invalidateUserAuthCache(userId: string): void {
@@ -386,7 +401,11 @@ export async function getSystemSettings(): Promise<SystemSettings> {
 		max_upload_mb: Math.max(10, Number(map.get('max_upload_mb') ?? 10240) || 10240),
 		performance_mode: isValidPerformanceMode(rawPerf) ? rawPerf : getActivePerformanceMode(),
 		auto_backup_interval: autoBackup,
-		backup_retention_count: Math.max(1, Math.min(100, Number(map.get('backup_retention_count') ?? 10) || 10))
+		backup_retention_count: Math.max(1, Math.min(100, Number(map.get('backup_retention_count') ?? 10) || 10)),
+		default_language: normalizeAppLanguage(map.get('default_language') ?? 'en'),
+		default_country: normalizeCountryCode(map.get('default_country') ?? 'US'),
+		plugin_mc_servers: (map.get('plugin_mc_servers') ?? '1') !== '0',
+		plugin_notes: (map.get('plugin_notes') ?? '1') !== '0'
 	};
 
 	runtimeCache.set('system:settings', settings, 30_000);

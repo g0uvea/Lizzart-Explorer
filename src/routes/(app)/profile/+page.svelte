@@ -1,11 +1,12 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { toast } from '$lib/stores/toast.svelte';
 	import { themeStore } from '$lib/stores/theme.svelte';
+	import { i18n, SUPPORTED_COUNTRIES, SUPPORTED_LANGUAGES } from '$lib/stores/i18n.svelte';
 	import { workspaceStore } from '$lib/stores/workspace.svelte';
 	import { ACCENT_PRESETS } from '$lib/theme';
-	import type { LayoutDensity, SortBy, SortDir, ViewMode } from '$lib/types';
+	import type { AppLanguage, LayoutDensity, SortBy, SortDir, ViewMode } from '$lib/types';
 	import { formatDate, getInitials } from '$lib/utils';
 	import {
 		User,
@@ -24,7 +25,8 @@
 		Minimize2,
 		Check,
 		MonitorSmartphone,
-		LogOut
+		LogOut,
+		Globe
 	} from 'lucide-svelte';
 
 	let { data } = $props();
@@ -39,6 +41,8 @@
 	let defaultViewMode = $state<ViewMode>('grid');
 	let defaultSortBy = $state<SortBy>('name');
 	let defaultSortDir = $state<SortDir>('asc');
+	let language = $state<AppLanguage>('en');
+	let country = $state('US');
 
 	let savingAccount = $state(false);
 	let savingAppearance = $state(false);
@@ -105,14 +109,19 @@
 	onMount(loadSessions);
 
 	$effect(() => {
-		firstName = data.user.first_name;
-		lastName = data.user.last_name;
-		avatarColor = data.user.avatar_color;
-		accentColor = data.user.accent_color;
-		layoutDensity = data.user.layout_density;
-		defaultViewMode = data.user.default_view_mode;
-		defaultSortBy = data.user.default_sort_by;
-		defaultSortDir = data.user.default_sort_dir;
+		const u = data.user;
+		untrack(() => {
+			firstName = u.first_name;
+			lastName = u.last_name;
+			avatarColor = u.avatar_color;
+			accentColor = u.accent_color;
+			layoutDensity = u.layout_density;
+			defaultViewMode = u.default_view_mode;
+			defaultSortBy = u.default_sort_by;
+			defaultSortDir = u.default_sort_dir;
+			language = u.language || 'en';
+			country = u.country || 'US';
+		});
 	});
 
 	async function saveAccount(e: SubmitEvent) {
@@ -125,7 +134,9 @@
 				body: JSON.stringify({
 					first_name: firstName,
 					last_name: lastName,
-					avatar_color: avatarColor
+					avatar_color: avatarColor,
+					language,
+					country
 				})
 			});
 			const result = await res.json();
@@ -133,7 +144,8 @@
 				toast.error(result.error || 'Erro ao atualizar conta.');
 				return;
 			}
-			toast.success('Dados da conta atualizados!');
+			i18n.setLocale(language, country);
+			toast.success('Account & Locale updated!');
 			await invalidateAll();
 		} finally {
 			savingAccount = false;
@@ -294,9 +306,9 @@
 
 <div class="mx-auto w-full max-w-5xl p-4 sm:p-6 lg:p-8">
 	<div class="mb-5">
-		<h1 class="text-2xl font-bold text-white">Configurações</h1>
+		<h1 class="text-2xl font-bold text-white">{i18n.t('profile.title')}</h1>
 		<p class="mt-1 text-sm text-slate-400">
-			Gerencie os dados da sua conta, segurança 2FA e aparência do sistema.
+			{i18n.t('profile.subtitle')}
 		</p>
 	</div>
 
@@ -310,7 +322,7 @@
 				: 'border-transparent text-slate-400 hover:text-slate-200'}"
 		>
 			<User class="h-4 w-4 {activeTab === 'account' ? 'text-accent-400' : ''}" />
-			Conta
+			{i18n.t('profile.tab_account')}
 		</button>
 		<button
 			type="button"
@@ -320,7 +332,7 @@
 				: 'border-transparent text-slate-400 hover:text-slate-200'}"
 		>
 			<Palette class="h-4 w-4 {activeTab === 'appearance' ? 'text-accent-400' : ''}" />
-			Aparência
+			{i18n.t('profile.tab_appearance')}
 		</button>
 	</div>
 
@@ -403,15 +415,15 @@
 		</div>
 
 		<div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-			<!-- Personal Data -->
+			<!-- Personal Data & Language/Country -->
 			<form onsubmit={saveAccount} class="space-y-4 rounded-2xl border border-[#1f2d45] bg-[#131c2e] p-5 sm:p-6">
 				<div class="flex items-center gap-2 border-b border-[#1f2d45] pb-3">
 					<User class="h-4 w-4 text-accent-400" />
-					<h3 class="text-sm font-semibold text-white">Dados da Conta</h3>
+					<h3 class="text-sm font-semibold text-white">{i18n.t('profile.account_data')}</h3>
 				</div>
 
 				<div>
-					<span class="mb-1 block text-xs text-slate-400">Usuário (imutável)</span>
+					<span class="mb-1 block text-xs text-slate-400">{i18n.t('profile.username_immutable')}</span>
 					<input
 						type="text"
 						disabled
@@ -422,7 +434,7 @@
 
 				<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 					<div>
-						<label for="pfn" class="mb-1 block text-xs text-slate-400">Nome</label>
+						<label for="pfn" class="mb-1 block text-xs text-slate-400">{i18n.t('profile.first_name')}</label>
 						<input
 							id="pfn"
 							type="text"
@@ -433,7 +445,7 @@
 						/>
 					</div>
 					<div>
-						<label for="pln" class="mb-1 block text-xs text-slate-400">Sobrenome</label>
+						<label for="pln" class="mb-1 block text-xs text-slate-400">{i18n.t('profile.last_name')}</label>
 						<input
 							id="pln"
 							type="text"
@@ -445,8 +457,43 @@
 					</div>
 				</div>
 
+				<!-- User Language & Country (Strictly Countries, no states) -->
+				<div class="grid grid-cols-1 gap-3 rounded-xl border border-[#1f2d45] bg-[#0e1525] p-3.5 sm:grid-cols-2">
+					<div>
+						<label for="plang" class="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-300">
+							<Globe class="h-3.5 w-3.5 text-accent-400" />
+							{i18n.t('profile.language')}
+						</label>
+						<select
+							id="plang"
+							bind:value={language}
+							onchange={() => i18n.setLocale(language, country)}
+							class="w-full rounded-xl border border-[#233047] bg-[#0b101b] px-3 py-2 text-sm text-white outline-none focus:border-accent-500"
+						>
+							{#each SUPPORTED_LANGUAGES as l (l.code)}
+								<option value={l.code}>{l.nativeName} ({l.name})</option>
+							{/each}
+						</select>
+					</div>
+					<div>
+						<label for="pcountry" class="mb-1 block text-xs font-medium text-slate-300">
+							{i18n.t('profile.country')}
+						</label>
+						<select
+							id="pcountry"
+							bind:value={country}
+							onchange={() => i18n.setLocale(language, country)}
+							class="w-full rounded-xl border border-[#233047] bg-[#0b101b] px-3 py-2 text-sm text-white outline-none focus:border-accent-500"
+						>
+							{#each SUPPORTED_COUNTRIES as c (c.code)}
+								<option value={c.code}>{c.name[language] || c.name.en} ({c.code})</option>
+							{/each}
+						</select>
+					</div>
+				</div>
+
 				<div>
-					<span class="mb-2 block text-xs text-slate-400">Foto de Perfil</span>
+					<span class="mb-2 block text-xs text-slate-400">{i18n.t('profile.profile_photo')}</span>
 					<div class="flex flex-wrap items-center gap-2">
 						<button
 							type="button"
@@ -455,7 +502,7 @@
 							class="inline-flex items-center gap-1.5 rounded-xl border border-[#233047] bg-[#0e1525] px-3.5 py-2 text-xs font-medium text-slate-200 hover:border-accent-500/40 hover:bg-[#19253c]"
 						>
 							<Camera class="h-3.5 w-3.5 text-accent-400" />
-							{uploadingAvatar ? 'Enviando...' : 'Enviar Nova Imagem'}
+							{uploadingAvatar ? i18n.t('profile.uploading') : i18n.t('profile.upload_new_image')}
 						</button>
 						{#if data.user.avatar_url}
 							<button
@@ -463,7 +510,7 @@
 								onclick={removeAvatar}
 								class="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-300 hover:bg-rose-500/20"
 							>
-								<Trash2 class="h-3.5 w-3.5" /> Remover
+								<Trash2 class="h-3.5 w-3.5" /> {i18n.t('profile.remove_photo')}
 							</button>
 						{/if}
 					</div>
@@ -475,7 +522,7 @@
 					class="inline-flex items-center gap-2 rounded-xl bg-accent-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-accent-500 disabled:opacity-50"
 				>
 					<Save class="h-4 w-4" />
-					{savingAccount ? 'Salvando...' : 'Salvar Dados da Conta'}
+					{savingAccount ? i18n.t('profile.saving') : i18n.t('profile.save_account')}
 				</button>
 			</form>
 

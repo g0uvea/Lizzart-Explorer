@@ -6,8 +6,11 @@ import { hashPassword } from '$lib/server/crypto';
 import { checkRateLimit, isRequestSecure } from '$lib/server/security';
 import {
 	createSession,
+	invalidateSettingsCache,
 	isValidUsername,
 	logAudit,
+	normalizeAppLanguage,
+	normalizeCountryCode,
 	normalizeUsername,
 	setAuthCookies
 } from '$lib/server/auth';
@@ -33,6 +36,8 @@ export const POST: RequestHandler = async ({ request, url, cookies, getClientAdd
 	const firstName = String(body?.first_name || '').trim();
 	const lastName = String(body?.last_name || '').trim();
 	const password = String(body?.password || '');
+	const language = normalizeAppLanguage(body?.language ?? 'en');
+	const country = normalizeCountryCode(body?.country ?? 'US');
 
 	if (!isValidUsername(username)) {
 		return json(
@@ -56,10 +61,18 @@ export const POST: RequestHandler = async ({ request, url, cookies, getClientAdd
 
 	// Admin starts WITHOUT any workspace connected (admin creates & connects workspaces in /admin)
 	await db.query(
-		`INSERT INTO users (id, username, first_name, last_name, password_hash, role, is_active, avatar_color, accent_color, layout_density)
-		 VALUES (?, ?, ?, ?, ?, 'admin', 1, '#10b981', '#10b981', 'normal')`,
-		[adminId, username, firstName, lastName, passwordHash]
+		`INSERT INTO users (id, username, first_name, last_name, password_hash, role, is_active, avatar_color, accent_color, layout_density, language, country)
+		 VALUES (?, ?, ?, ?, ?, 'admin', 1, '#10b981', '#10b981', 'normal', ?, ?)`,
+		[adminId, username, firstName, lastName, passwordHash, language, country]
 	);
+
+	// Persist the admin's chosen Language & Country as the global base defaults for the application
+	await db.query(
+		`INSERT INTO system_settings (setting_key, setting_value) VALUES ('default_language', ?), ('default_country', ?)
+		 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+		[language, country]
+	);
+	invalidateSettingsCache();
 
 	resetAdminExistsCache();
 
