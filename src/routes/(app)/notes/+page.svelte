@@ -176,25 +176,9 @@
 			selectionFocusLine = idx;
 			return;
 		}
-		// Clicking a line clears any previous multi-line range and starts tracking a new potential drag
 		isPointerSelecting = true;
 		selectionAnchorLine = idx;
 		selectionFocusLine = idx;
-		if (activeLineIndex !== idx) {
-			void activateLineAfterReset(idx);
-		}
-	}
-
-	async function activateLineAfterReset(idx: number) {
-		selectionAnchorLine = idx;
-		selectionFocusLine = idx;
-		const clamped = Math.max(0, Math.min(lines.length - 1, idx));
-		activeLineIndex = clamped;
-		await tick();
-		if (activeInputEl) {
-			autoResizeActiveTextarea(activeInputEl);
-			activeInputEl.focus();
-		}
 	}
 
 	function onLineMouseEnter(idx: number, e: MouseEvent) {
