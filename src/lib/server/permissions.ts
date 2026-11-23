@@ -19,6 +19,7 @@ export interface NodeRow extends RowDataPacket {
 	size_bytes: number;
 	disk_path: string | null;
 	sha256: string | null;
+	is_note?: number;
 	is_starred: number;
 	is_trashed: number;
 	trashed_at: Date | string | null;
@@ -48,6 +49,24 @@ export async function getEffectivePermission(
 	const db = getPool();
 	const node = await getNodeById(nodeId);
 	if (!node) return { node: null, permission: null };
+
+	// Personal notes: ONLY the note creator is 'owner' (invisible to other workspace members unless explicitly shared via node_permissions)
+	if (Boolean(node.is_note)) {
+		if (node.created_by === user.id) {
+			return { node, permission: 'owner' };
+		}
+		const [permRows] = await db.query<RowDataPacket[]>(
+			'SELECT permission FROM node_permissions WHERE user_id = ? AND node_id = ? LIMIT 1',
+			[user.id, node.id]
+		);
+		if (permRows.some((r) => r.permission === 'editor')) {
+			return { node, permission: 'editor' };
+		}
+		if (permRows.some((r) => r.permission === 'viewer')) {
+			return { node, permission: 'viewer' };
+		}
+		return { node, permission: null };
+	}
 
 	// 1. Check workspace membership
 	const membership = await getWorkspaceMembership(user.id, node.workspace_id);

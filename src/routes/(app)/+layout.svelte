@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { quotaStore } from '$lib/stores/quota.svelte';
 	import { workspaceStore } from '$lib/stores/workspace.svelte';
 	import { themeStore } from '$lib/stores/theme.svelte';
+	import { i18n } from '$lib/stores/i18n.svelte';
 	import { dragStore, LIZZART_DRAG_MIME } from '$lib/stores/drag.svelte';
 	import { transferManager } from '$lib/stores/transfers.svelte';
 	import { toast } from '$lib/stores/toast.svelte';
@@ -25,7 +26,9 @@
 		Layers,
 		ChevronDown,
 		Check,
-		Plus
+		Plus,
+		Puzzle,
+		FileText
 	} from 'lucide-svelte';
 
 	let { data, children } = $props();
@@ -40,11 +43,16 @@
 	});
 
 	$effect(() => {
-		if (data.user) {
-			themeStore.init(data.user.accent_color, data.user.layout_density);
-		}
+		const u = data.user;
+		const wsList = data.workspaces || [];
 		const urlWs = $page.url.searchParams.get('ws');
-		workspaceStore.sync(data.workspaces || [], urlWs);
+		untrack(() => {
+			if (u) {
+				themeStore.init(u.accent_color, u.layout_density);
+				i18n.init(u.language, u.country);
+			}
+			workspaceStore.sync(wsList, urlWs);
+		});
 	});
 
 	$effect(() => {
@@ -77,9 +85,9 @@
 	}
 
 	function roleLabel(role: string): string {
-		if (role === 'manager') return 'Gestor';
-		if (role === 'editor') return 'Editor';
-		return 'Leitor';
+		if (role === 'manager') return i18n.t('role.manager');
+		if (role === 'editor') return i18n.t('role.editor');
+		return i18n.t('role.viewer');
 	}
 
 	function selectWorkspace(wsId: string) {
@@ -93,6 +101,8 @@
 				params.set('view', currentView);
 			}
 			goto(`/?${params.toString()}`);
+		} else if (currentPath.startsWith('/notes')) {
+			goto(`/notes?ws=${encodeURIComponent(wsId)}`);
 		} else {
 			goto(`/?ws=${encodeURIComponent(wsId)}`);
 		}
@@ -191,109 +201,109 @@
 			? 'translate-x-0'
 			: '-translate-x-full'}"
 	>
-		<!-- Brand -->
-		<div class="flex items-center justify-between px-4 py-4 sm:px-5">
-			<a href={navHref('drive')} onclick={() => (mobileOpen = false)} class="flex min-w-0 items-center gap-3">
-				<div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-accent-500 to-accent-700 shadow-lg shadow-accent-600/25">
-					<HardDrive class="h-5 w-5 text-white" />
-				</div>
-				<div class="min-w-0">
-					<span class="block truncate text-sm font-bold tracking-tight text-white">Lizzart Explorer</span>
-					<span class="block truncate text-[11px] text-slate-400">Cloud + Workspaces</span>
-				</div>
-			</a>
-			<button
-				type="button"
-				onclick={() => (mobileOpen = false)}
-				class="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-[#19253c] hover:text-white lg:hidden"
-				aria-label="Fechar menu lateral"
-			>
-				<X class="h-5 w-5" />
-			</button>
-		</div>
-
-		<!-- Workspace Switcher -->
-		<div class="relative px-3 pb-3">
-			{#if activeWs}
-				<button
-					type="button"
-					onclick={() => (wsDropdownOpen = !wsDropdownOpen)}
-					class="flex w-full items-center justify-between gap-2 rounded-xl border border-[#1f2d45] bg-[#131c2e] px-3 py-2.5 text-left transition hover:border-accent-500/40"
-				>
-					<div class="flex min-w-0 items-center gap-2.5">
-						<span
-							class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-white shadow"
-							style="background-color: {activeWs.color}"
-						>
-							<Layers class="h-3.5 w-3.5" />
-						</span>
-						<div class="min-w-0">
-							<p class="truncate text-xs font-semibold text-white">{activeWs.name}</p>
-							<p class="truncate text-[10px] text-slate-400">
-								Workspace • {roleLabel(activeWs.role)}
-							</p>
+		<!-- Top Header: Active Workspace Icon, Name & User Role (replaces static app brand) -->
+		<div class="relative px-3 pt-3.5 pb-3">
+			<div class="flex items-center gap-2">
+				{#if activeWs}
+					<button
+						type="button"
+						onclick={() => (wsDropdownOpen = !wsDropdownOpen)}
+						class="flex min-w-0 flex-1 items-center justify-between gap-2.5 rounded-xl border border-[#1f2d45] bg-[#131c2e] px-3 py-2.5 text-left transition hover:border-accent-500/40"
+					>
+						<div class="flex min-w-0 items-center gap-3">
+							<span
+								class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white shadow-lg"
+								style="background-color: {activeWs.color}"
+							>
+								<Layers class="h-5 w-5" />
+							</span>
+							<div class="min-w-0">
+								<span class="block truncate text-sm font-bold tracking-tight text-white">
+									{activeWs.name}
+								</span>
+								<span class="block truncate text-[11px] text-slate-400">
+									Workspace • {roleLabel(activeWs.role)}
+								</span>
+							</div>
+						</div>
+						<ChevronDown class="h-4 w-4 shrink-0 text-slate-400 transition {wsDropdownOpen ? 'rotate-180' : ''}" />
+					</button>
+				{:else}
+					<div class="flex min-w-0 flex-1 items-center justify-between gap-2.5 rounded-xl border border-dashed border-[#233047] bg-[#111929]/70 px-3 py-2.5 text-xs">
+						<div class="flex min-w-0 items-center gap-3">
+							<div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#19253c] text-slate-400">
+								<Layers class="h-5 w-5" />
+							</div>
+							<div class="min-w-0">
+								<span class="block truncate text-sm font-bold text-slate-200">
+									{i18n.t('nav.no_workspace')}
+								</span>
+								{#if data.user.role === 'admin'}
+									<a
+										href="/admin"
+										onclick={() => (mobileOpen = false)}
+										class="inline-flex items-center gap-1 text-[11px] font-semibold text-accent-400 hover:underline"
+									>
+										<Plus class="h-3 w-3" /> {i18n.t('nav.create_connect_admin')}
+									</a>
+								{:else}
+									<span class="block truncate text-[10px] text-slate-500">
+										{i18n.t('nav.waiting_admin')}
+									</span>
+								{/if}
+							</div>
 						</div>
 					</div>
-					<ChevronDown class="h-4 w-4 shrink-0 text-slate-400 transition {wsDropdownOpen ? 'rotate-180' : ''}" />
-				</button>
-
-				{#if wsDropdownOpen}
-					<div class="absolute inset-x-3 top-full z-50 mt-1 max-h-60 overflow-y-auto rounded-xl border border-[#2a3b58] bg-[#111929] p-1.5 shadow-2xl">
-						<p class="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-							Suas Workspaces ({workspaceStore.workspaces.length})
-						</p>
-						{#each workspaceStore.workspaces as ws (ws.id)}
-							<button
-								type="button"
-								onclick={() => selectWorkspace(ws.id)}
-								class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition {ws.id === activeWs.id
-									? 'bg-accent-500/15 text-white'
-									: 'text-slate-300 hover:bg-[#19253c]'}"
-							>
-								<span class="flex min-w-0 items-center gap-2">
-									<span class="h-2.5 w-2.5 shrink-0 rounded-full" style="background-color: {ws.color}"></span>
-									<span class="truncate font-medium">{ws.name}</span>
-								</span>
-								<span class="flex shrink-0 items-center gap-1.5">
-									<span class="text-[10px] text-slate-500">{roleLabel(ws.role)}</span>
-									{#if ws.id === activeWs.id}
-										<Check class="h-3.5 w-3.5 text-accent-400" />
-									{/if}
-								</span>
-							</button>
-						{/each}
-						{#if data.user.role === 'admin'}
-							<div class="my-1 border-t border-[#1f2d45]"></div>
-							<a
-								href="/admin"
-								onclick={() => {
-									wsDropdownOpen = false;
-									mobileOpen = false;
-								}}
-								class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium text-accent-300 hover:bg-accent-500/15"
-							>
-								<Plus class="h-3.5 w-3.5" />
-								Gerenciar Workspaces
-							</a>
-						{/if}
-					</div>
 				{/if}
-			{:else}
-				<div class="rounded-xl border border-dashed border-[#233047] bg-[#111929]/70 px-3 py-2.5 text-xs">
-					<div class="flex items-center gap-2 text-slate-300">
-						<Layers class="h-4 w-4 shrink-0 text-slate-500" />
-						<span class="truncate font-medium">Nenhuma workspace</span>
-					</div>
+
+				<button
+					type="button"
+					onclick={() => (mobileOpen = false)}
+					class="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-[#19253c] hover:text-white lg:hidden"
+					aria-label="Fechar menu lateral"
+				>
+					<X class="h-5 w-5" />
+				</button>
+			</div>
+
+			{#if activeWs && wsDropdownOpen}
+				<div class="absolute inset-x-3 top-full z-50 mt-1 max-h-60 overflow-y-auto rounded-xl border border-[#2a3b58] bg-[#111929] p-1.5 shadow-2xl">
+					<p class="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+						{i18n.t('nav.your_workspaces')} ({workspaceStore.workspaces.length})
+					</p>
+					{#each workspaceStore.workspaces as ws (ws.id)}
+						<button
+							type="button"
+							onclick={() => selectWorkspace(ws.id)}
+							class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition {ws.id === activeWs.id
+								? 'bg-accent-500/15 text-white'
+								: 'text-slate-300 hover:bg-[#19253c]'}"
+						>
+							<span class="flex min-w-0 items-center gap-2">
+								<span class="h-2.5 w-2.5 shrink-0 rounded-full" style="background-color: {ws.color}"></span>
+								<span class="truncate font-medium">{ws.name}</span>
+							</span>
+							<span class="flex shrink-0 items-center gap-1.5">
+								<span class="text-[10px] text-slate-500">{roleLabel(ws.role)}</span>
+								{#if ws.id === activeWs.id}
+									<Check class="h-3.5 w-3.5 text-accent-400" />
+								{/if}
+							</span>
+						</button>
+					{/each}
 					{#if data.user.role === 'admin'}
+						<div class="my-1 border-t border-[#1f2d45]"></div>
 						<a
 							href="/admin"
-							onclick={() => (mobileOpen = false)}
-							class="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-accent-400 hover:underline"
+							onclick={() => {
+								wsDropdownOpen = false;
+								mobileOpen = false;
+							}}
+							class="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium text-accent-300 hover:bg-accent-500/15"
 						>
-							<Plus class="h-3 w-3" /> Criar / Conectar no Admin
+							<Plus class="h-3.5 w-3.5" />
+							{i18n.t('nav.manage_workspaces')}
 						</a>
-					{:else}
-						<p class="mt-1 text-[10px] text-slate-500">Aguardando vínculo pelo Admin</p>
 					{/if}
 				</div>
 			{/if}
@@ -303,7 +313,7 @@
 		<nav class="flex-1 space-y-5 overflow-y-auto px-3 py-1">
 			<div>
 				<p class="mb-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-					Armazenamento
+					{i18n.t('nav.storage')}
 				</p>
 				<div class="space-y-1">
 					<a
@@ -321,7 +331,7 @@
 								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 					>
 						<HardDrive class="h-4 w-4 shrink-0 {isNavActive('/', 'drive') || sidebarDropTarget === 'root' ? 'text-accent-400' : ''}" />
-						<span class="truncate">Arquivos</span>
+						<span class="truncate">{i18n.t('nav.files')}</span>
 					</a>
 					<a
 						href={navHref('recent')}
@@ -331,7 +341,7 @@
 							: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 					>
 						<Clock class="h-4 w-4 shrink-0 {isNavActive('/', 'recent') ? 'text-accent-400' : ''}" />
-						<span class="truncate">Recentes</span>
+						<span class="truncate">{i18n.t('nav.recent')}</span>
 					</a>
 					<a
 						href={navHref('starred')}
@@ -348,7 +358,7 @@
 								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 					>
 						<Star class="h-4 w-4 shrink-0 {isNavActive('/', 'starred') || sidebarDropTarget === 'starred' ? 'text-amber-400' : ''}" />
-						<span class="truncate">Favoritos</span>
+						<span class="truncate">{i18n.t('nav.starred')}</span>
 					</a>
 					<a
 						href={navHref('shared')}
@@ -358,7 +368,7 @@
 							: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 					>
 						<Users class="h-4 w-4 shrink-0 {isNavActive('/', 'shared') ? 'text-accent-400' : ''}" />
-						<span class="truncate">Compartilhados</span>
+						<span class="truncate">{i18n.t('nav.shared')}</span>
 					</a>
 					<a
 						href={navHref('trash')}
@@ -375,15 +385,40 @@
 								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 					>
 						<Trash2 class="h-4 w-4 shrink-0 {isNavActive('/', 'trash') || sidebarDropTarget === 'trash' ? 'text-rose-400' : ''}" />
-						<span class="truncate">Lixeira</span>
+						<span class="truncate">{i18n.t('nav.trash')}</span>
 					</a>
 				</div>
 			</div>
 
+			{#if data.plugins?.notes !== false}
+				<div>
+					<p class="mb-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+						{i18n.t('nav.apps_section')}
+					</p>
+					<div class="space-y-1">
+						<a
+							href={activeWs ? `/notes?ws=${encodeURIComponent(activeWs.id)}` : '/notes'}
+							onclick={() => (mobileOpen = false)}
+							class="flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition {isNavActive('/notes')
+								? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
+								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
+						>
+							<span class="flex min-w-0 items-center gap-3">
+								<FileText class="h-4 w-4 shrink-0 {isNavActive('/notes') ? 'text-accent-400' : ''}" />
+								<span class="truncate">{i18n.t('nav.notes')}</span>
+							</span>
+							<span class="shrink-0 rounded-md bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-300">
+								.md
+							</span>
+						</a>
+					</div>
+				</div>
+			{/if}
+
 			{#if data.user.role === 'admin'}
 				<div>
 					<p class="mb-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-						Administração & Infra
+						{i18n.t('nav.admin_section')}
 					</p>
 					<div class="space-y-1">
 						<a
@@ -394,30 +429,42 @@
 								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 						>
 							<Shield class="h-4 w-4 shrink-0 {isNavActive('/admin') ? 'text-accent-400' : ''}" />
-							<span class="truncate">Painel Admin</span>
+							<span class="truncate">{i18n.t('nav.admin_panel')}</span>
 						</a>
 						<a
-							href="/minecraft"
+							href="/plugins"
 							onclick={() => (mobileOpen = false)}
-							class="flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition {isNavActive('/minecraft')
+							class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition {isNavActive('/plugins')
 								? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
 								: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 						>
-							<span class="flex min-w-0 items-center gap-3">
-								<Server class="h-4 w-4 shrink-0 {isNavActive('/minecraft') ? 'text-accent-400' : ''}" />
-								<span class="truncate">Servidores MC</span>
-							</span>
-							<span class="shrink-0 rounded-md bg-accent-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-300">
-								UI
-							</span>
+							<Puzzle class="h-4 w-4 shrink-0 {isNavActive('/plugins') ? 'text-accent-400' : ''}" />
+							<span class="truncate">{i18n.t('nav.plugins')}</span>
 						</a>
+						{#if data.plugins?.mc_servers !== false}
+							<a
+								href="/minecraft"
+								onclick={() => (mobileOpen = false)}
+								class="flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition {isNavActive('/minecraft')
+									? 'bg-[#19253c] text-white shadow-xs ring-1 ring-accent-500/40'
+									: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
+							>
+								<span class="flex min-w-0 items-center gap-3">
+									<Server class="h-4 w-4 shrink-0 {isNavActive('/minecraft') ? 'text-accent-400' : ''}" />
+									<span class="truncate">{i18n.t('nav.mc_servers')}</span>
+								</span>
+								<span class="shrink-0 rounded-md bg-accent-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-300">
+									UI
+								</span>
+							</a>
+						{/if}
 					</div>
 				</div>
 			{/if}
 
 			<div>
 				<p class="mb-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-					Preferências
+					{i18n.t('nav.preferences')}
 				</p>
 				<a
 					href="/profile"
@@ -427,7 +474,7 @@
 						: 'text-slate-400 hover:bg-[#141e33] hover:text-slate-200'}"
 				>
 					<Settings class="h-4 w-4 shrink-0 {isNavActive('/profile') ? 'text-accent-400' : ''}" />
-					<span class="truncate">Configurações</span>
+					<span class="truncate">{i18n.t('nav.settings')}</span>
 				</a>
 			</div>
 		</nav>
@@ -457,13 +504,13 @@
 					{/if}
 				</div>
 				<p class="mt-2 truncate text-[11px] text-slate-400">
-					<strong class="text-slate-200">{formatBytes(quotaStore.usedBytes)}</strong> de
+					<strong class="text-slate-200">{formatBytes(quotaStore.usedBytes)}</strong> {i18n.t('nav.of')}
 					{formatBytes(quotaStore.quotaBytes)}
 				</p>
 			{:else}
 				<div class="flex items-center gap-2 text-[11px] text-slate-400">
 					<Database class="h-3.5 w-3.5 shrink-0 text-slate-500" />
-					<span>Cota gerenciada por Workspace</span>
+					<span>{i18n.t('nav.quota_by_ws')}</span>
 				</div>
 			{/if}
 		</div>
@@ -528,15 +575,20 @@
 			>
 				{#if activeWs}
 					<span
-						class="h-2.5 w-2.5 shrink-0 rounded-full"
+						class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white"
 						style="background-color: {activeWs.color}"
-					></span>
-					<span class="truncate text-sm font-bold text-white">{activeWs.name}</span>
-				{:else}
-					<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent-600">
-						<HardDrive class="h-3.5 w-3.5 text-white" />
+					>
+						<Layers class="h-3.5 w-3.5" />
+					</span>
+					<div class="min-w-0 text-left">
+						<span class="block truncate text-xs font-bold text-white">{activeWs.name}</span>
+						<span class="block truncate text-[10px] text-slate-400">{roleLabel(activeWs.role)}</span>
 					</div>
-					<span class="truncate text-sm font-bold text-white">Lizzart Explorer</span>
+				{:else}
+					<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#19253c]">
+						<Layers class="h-3.5 w-3.5 text-slate-300" />
+					</div>
+					<span class="truncate text-sm font-bold text-white">{i18n.t('nav.no_workspace')}</span>
 				{/if}
 			</button>
 

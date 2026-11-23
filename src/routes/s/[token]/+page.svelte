@@ -2,6 +2,7 @@
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
 	import { formatBytes, formatDate, getFileCategory, isPreviewable } from '$lib/utils';
+	import { renderMarkdownToHtml } from '$lib/markdown';
 	import FileIcon from '$lib/components/explorer/FileIcon.svelte';
 	import { Download, HardDrive, Lock, ShieldAlert, Eye } from 'lucide-svelte';
 
@@ -26,6 +27,36 @@
 	let unlocked = $state(false);
 	let verifying = $state(false);
 	let passwordError = $state('');
+	let textContent = $state<string | null>(null);
+	let isMarkdownFile = $derived(
+		Boolean(
+			share &&
+				(share.name.toLowerCase().endsWith('.md') ||
+					(share.mime_type || '').toLowerCase().includes('markdown'))
+		)
+	);
+
+	async function loadInlineTextIfNeeded() {
+		if (!share || !unlocked) return;
+		const cat = getFileCategory('file', share.mime_type, share.name);
+		if (isMarkdownFile || cat === 'code') {
+			try {
+				const url = `/api/share/${token}/download?inline=1${password ? `&password=${encodeURIComponent(password)}` : ''}`;
+				const res = await fetch(url);
+				if (res.ok) {
+					textContent = await res.text();
+				}
+			} catch {
+				textContent = null;
+			}
+		}
+	}
+
+	$effect(() => {
+		if (unlocked && share) {
+			void loadInlineTextIfNeeded();
+		}
+	});
 
 	onMount(async () => {
 		try {
@@ -167,6 +198,12 @@
 								</div>
 							{:else if category === 'pdf'}
 								<iframe src={inlineUrl} title={share.name} class="h-[520px] w-full"></iframe>
+							{:else if isMarkdownFile && textContent !== null}
+								<div class="max-h-[560px] overflow-y-auto p-5 sm:p-7">
+									{@html renderMarkdownToHtml(textContent)}
+								</div>
+							{:else if textContent !== null}
+								<pre class="max-h-[520px] overflow-auto p-4 font-mono text-xs leading-relaxed text-slate-200">{textContent}</pre>
 							{:else}
 								<div class="flex flex-col items-center justify-center py-10 text-center text-sm text-slate-400">
 									<Eye class="mb-2 h-8 w-8 text-indigo-400" />

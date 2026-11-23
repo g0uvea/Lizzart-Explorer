@@ -74,7 +74,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 				 INNER JOIN storage_nodes n ON n.id = np.node_id
 				 INNER JOIN workspaces w ON w.id = n.workspace_id
 				 LEFT JOIN users u ON u.id = n.created_by
-				 WHERE np.user_id = ? AND n.is_trashed = 0 AND w.is_active = 1
+				 WHERE np.user_id = ? AND n.is_trashed = 0 AND n.is_note = 0 AND w.is_active = 1
 				 ${orderClause}
 				 LIMIT ?`,
 				[user.id, listLimit]
@@ -98,7 +98,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 			 FROM storage_nodes n
 			 INNER JOIN workspaces w ON w.id = n.workspace_id
 			 LEFT JOIN users u ON u.id = n.created_by
-			 WHERE n.parent_id = ? AND n.is_trashed = 0
+			 WHERE n.parent_id = ? AND n.is_trashed = 0 AND n.is_note = 0
 			 ${orderClause}
 			 LIMIT ?`,
 			[parentId, listLimit]
@@ -152,7 +152,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 			 FROM storage_nodes n
 			 INNER JOIN workspaces w ON w.id = n.workspace_id
 			 LEFT JOIN users u ON u.id = n.created_by
-			 WHERE n.workspace_id = ? AND n.is_trashed = 0 AND n.name LIKE ?
+			 WHERE n.workspace_id = ? AND n.is_trashed = 0 AND n.is_note = 0 AND n.name LIKE ?
 			 ${orderClause}
 			 LIMIT ?`,
 			[ws.id, like, Math.min(200, listLimit)]
@@ -170,7 +170,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 			 FROM storage_nodes n
 			 INNER JOIN workspaces w ON w.id = n.workspace_id
 			 LEFT JOIN users u ON u.id = n.created_by
-			 WHERE n.workspace_id = ? AND n.is_starred = 1 AND n.is_trashed = 0
+			 WHERE n.workspace_id = ? AND n.is_starred = 1 AND n.is_trashed = 0 AND n.is_note = 0
 			 ${orderClause}
 			 LIMIT ?`,
 			[ws.id, listLimit]
@@ -188,7 +188,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 			 FROM storage_nodes n
 			 INNER JOIN workspaces w ON w.id = n.workspace_id
 			 LEFT JOIN users u ON u.id = n.created_by
-			 WHERE n.workspace_id = ? AND n.type = 'file' AND n.is_trashed = 0
+			 WHERE n.workspace_id = ? AND n.type = 'file' AND n.is_trashed = 0 AND n.is_note = 0
 			 ORDER BY n.updated_at DESC
 			 LIMIT 60`,
 			[ws.id]
@@ -204,7 +204,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 			 FROM storage_nodes n
 			 INNER JOIN workspaces w ON w.id = n.workspace_id
 			 LEFT JOIN users u ON u.id = n.created_by
-			 WHERE n.workspace_id = ? AND n.is_trashed = 1
+			 WHERE n.workspace_id = ? AND n.is_trashed = 1 AND n.is_note = 0
 			 ORDER BY n.trashed_at DESC
 			 LIMIT ?`,
 			[ws.id, listLimit]
@@ -234,7 +234,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 			 FROM storage_nodes n
 			 INNER JOIN workspaces w ON w.id = n.workspace_id
 			 LEFT JOIN users u ON u.id = n.created_by
-			 WHERE n.workspace_id = ? AND n.parent_id = ? AND n.is_trashed = 0
+			 WHERE n.workspace_id = ? AND n.parent_id = ? AND n.is_trashed = 0 AND n.is_note = 0
 			 ${orderClause}
 			 LIMIT ?`,
 			[ws.id, parentId, listLimit]
@@ -266,7 +266,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 		 FROM storage_nodes n
 		 INNER JOIN workspaces w ON w.id = n.workspace_id
 		 LEFT JOIN users u ON u.id = n.created_by
-		 WHERE n.workspace_id = ? AND n.parent_id IS NULL AND n.is_trashed = 0
+		 WHERE n.workspace_id = ? AND n.parent_id IS NULL AND n.is_trashed = 0 AND n.is_note = 0
 		 ${orderClause}
 		 LIMIT ?`,
 		[ws.id, listLimit]
