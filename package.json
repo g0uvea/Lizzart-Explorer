@@ -3,13 +3,18 @@
 	"version": "2.0.0",
 	"private": true,
 	"type": "module",
+	"bin": {
+		"lizzart": "./scripts/lizzart-cli.ts"
+	},
 	"scripts": {
-		"dev": "BODY_SIZE_LIMIT=Infinity bunx --bun vite dev",
-		"build": "bunx --bun vite build",
-		"preview": "BODY_SIZE_LIMIT=Infinity bunx --bun vite preview",
+		"dev": "BODY_SIZE_LIMIT=Infinity bun --bun vite dev",
+		"build": "bun --bun vite build",
+		"preview": "BODY_SIZE_LIMIT=Infinity bun --bun vite preview",
 		"start": "BODY_SIZE_LIMIT=Infinity bun ./build/index.js",
+		"lizzart": "bun run scripts/lizzart-cli.ts",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"db:init": "bun run src/lib/server/db/seed.ts",
+		"reset": "bun run scripts/reset-dev.ts",
 		"test:e2e": "bun run scripts/verify-e2e.ts",
 		"docker:build": "docker build -t lizzart-explorer:latest .",
 		"docker:export": "bash scripts/export-docker.sh"
@@ -27,6 +32,7 @@
 		"vite": "^6.3.3"
 	},
 	"dependencies": {
+		"ffmpeg-static": "^5.3.0",
 		"lucide-svelte": "^0.511.0",
 		"mysql2": "^3.14.1",
 		"qrcode": "^1.5.4"

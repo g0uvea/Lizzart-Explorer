@@ -20,19 +20,22 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
-# Stage 3: Unified Runtime (MariaDB + Bun + Lizzart Explorer)
+# Stage 3: Unified Runtime (Nginx + MariaDB + Bun + Lizzart Explorer + CLI)
 FROM debian:bookworm-slim AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=production \
-    HOST=0.0.0.0 \
+    HOST=127.0.0.1 \
     PORT=3000 \
+    APP_INTERNAL_PORT=3001 \
     BODY_SIZE_LIMIT=Infinity \
     STORAGE_ROOT=/data/storage \
     CONFIG_DIR=/data/config \
     ENV_FILE_PATH=/data/config/.env
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    nginx-light \
+    ffmpeg \
     mariadb-server \
     mariadb-client \
     ca-certificates \
@@ -51,18 +54,22 @@ RUN groupadd --system --gid 1001 lizzart \
 
 WORKDIR /app
 
-# Copy production build & lean dependencies
+# Copy production build, CLI & lean dependencies
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/build ./build
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/database/schema.sql ./database/schema.sql
 
-# Copy hardened MariaDB config & unified process supervisor entrypoint
+# Copy hardened Nginx, MariaDB config & unified process supervisor entrypoint + global `lizzart` CLI
+COPY docker/nginx-lizzart.conf /etc/nginx/nginx.conf
 COPY docker/mariadb-lizzart.cnf /etc/mysql/mariadb.conf.d/99-lizzart.cnf
 COPY docker/entrypoint.sh /usr/local/bin/lizzart-entrypoint.sh
-RUN chmod +x /usr/local/bin/lizzart-entrypoint.sh \
+COPY scripts/lizzart /usr/local/bin/lizzart
+RUN chmod +x /usr/local/bin/lizzart-entrypoint.sh /usr/local/bin/lizzart \
     && chown -R lizzart:lizzart /app \
-    && mkdir -p /data/mariadb /data/storage /data/config /run/mysqld \
+    && mkdir -p /data/mariadb /data/storage /data/config /run/mysqld /var/log/nginx /var/lib/nginx \
     && chown -R mysql:mysql /data/mariadb /run/mysqld \
     && chown -R lizzart:lizzart /data/storage /data/config
 

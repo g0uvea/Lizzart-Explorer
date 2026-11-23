@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Global `lizzart` CLI launcher for production Docker & Linux servers
+if [ -f "/data/config/.env" ]; then
+	set -a
+	# shellcheck disable=SC1091
+	source "/data/config/.env"
+	set +a
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "/app/scripts/lizzart-cli.ts" ]; then
+	cd /app
+	exec bun run /app/scripts/lizzart-cli.ts "$@"
+else
+	cd "${SCRIPT_DIR}/.."
+	exec bun run "${SCRIPT_DIR}/lizzart-cli.ts" "$@"
+fi

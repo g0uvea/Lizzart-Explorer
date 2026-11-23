@@ -56,13 +56,33 @@ export DB_NAME="${DB_NAME:-lizzart_explorer}"
 export STORAGE_ROOT="${STORAGE_ROOT:-${STORAGE_DIR}}"
 export CONFIG_DIR="${CONFIG_DIR}"
 export ENV_FILE_PATH="${ENV_FILE}"
-export HOST="0.0.0.0"
-export PORT="${SAVED_PORT:-${PORT:-3000}}"
+export PUBLIC_PORT="${SAVED_PORT:-${PORT:-3000}}"
+export APP_INTERNAL_PORT="${APP_INTERNAL_PORT:-3001}"
+export HOST="127.0.0.1"
+export PORT="${APP_INTERNAL_PORT}"
 export BODY_SIZE_LIMIT="Infinity"
 export NODE_ENV="production"
 [ -n "${SAVED_ORIGIN}" ] && export ORIGIN="${SAVED_ORIGIN}"
 [ -n "${SAVED_FORCE_HTTPS}" ] && export FORCE_HTTPS="${SAVED_FORCE_HTTPS}"
 [ -n "${SAVED_PERF}" ] && export PERFORMANCE_MODE="${SAVED_PERF}"
+
+# Auto-tune MariaDB & Nginx for legacy mobile/Android/low-RAM hosts vs industrial hosts
+TOTAL_MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 2048)
+if [ "${PERFORMANCE_MODE:-}" = "legacy_mobile" ] || [ "${TOTAL_MEM_MB}" -le 1200 ]; then
+	echo "[Lizzart All-in-One] Modo Ultra-Leve detectado (RAM: ${TOTAL_MEM_MB} MB) — ajustando MariaDB buffer pool para 32M..."
+	sed -i 's/innodb_buffer_pool_size = .*/innodb_buffer_pool_size = 32M/' /etc/mysql/mariadb.conf.d/99-lizzart.cnf || true
+	sed -i 's/max_connections = .*/max_connections = 25/' /etc/mysql/mariadb.conf.d/99-lizzart.cnf || true
+	sed -i 's/worker_processes .*/worker_processes 1;/' /etc/nginx/nginx.conf || true
+elif [ "${PERFORMANCE_MODE:-}" = "ultra_fast" ] && [ "${TOTAL_MEM_MB}" -ge 8000 ]; then
+	echo "[Lizzart All-in-One] Modo Industrial detectado (RAM: ${TOTAL_MEM_MB} MB) — ajustando MariaDB buffer pool para 1024M..."
+	sed -i 's/innodb_buffer_pool_size = .*/innodb_buffer_pool_size = 1024M/' /etc/mysql/mariadb.conf.d/99-lizzart.cnf || true
+	sed -i 's/max_connections = .*/max_connections = 200/' /etc/mysql/mariadb.conf.d/99-lizzart.cnf || true
+fi
+
+# Adjust Nginx public listen port & backend port dynamically
+sed -i "s/listen 3000 default_server;/listen ${PUBLIC_PORT} default_server;/g" /etc/nginx/nginx.conf || true
+sed -i "s/listen \[::\]:3000 default_server;/listen [::]:${PUBLIC_PORT} default_server;/g" /etc/nginx/nginx.conf || true
+sed -i "s/server 127.0.0.1:3001;/server 127.0.0.1:${APP_INTERNAL_PORT};/g" /etc/nginx/nginx.conf || true
 
 # Initialize MariaDB system tables if datadir is empty
 if [ ! -d "${MARIADB_DIR}/mysql" ]; then
@@ -120,12 +140,20 @@ mariadb --socket=/run/mysqld/mysqld.sock <<-EOSQL
 	FLUSH PRIVILEGES;
 EOSQL
 
-echo "[Lizzart All-in-One] MariaDB pronto! Iniciando Lizzart Explorer na porta ${PORT}..."
+echo "[Lizzart All-in-One] MariaDB pronto! Iniciando backend Lizzart Explorer (127.0.0.1:${APP_INTERNAL_PORT})..."
 gosu lizzart bun /app/build/index.js &
 APP_PID=$!
 
+echo "[Lizzart All-in-One] Iniciando Nginx Reverse Proxy na porta pública ${PUBLIC_PORT}..."
+nginx -g "daemon off;" &
+NGINX_PID=$!
+
 shutdown_all() {
 	echo "[Lizzart All-in-One] Encerramento gracioso solicitado..."
+	if kill -0 "${NGINX_PID}" 2>/dev/null; then
+		nginx -s quit 2>/dev/null || kill -TERM "${NGINX_PID}" 2>/dev/null || true
+		wait "${NGINX_PID}" 2>/dev/null || true
+	fi
 	if kill -0 "${APP_PID}" 2>/dev/null; then
 		kill -TERM "${APP_PID}" 2>/dev/null || true
 		wait "${APP_PID}" 2>/dev/null || true
@@ -134,23 +162,30 @@ shutdown_all() {
 		mariadb-admin --socket=/run/mysqld/mysqld.sock shutdown >/dev/null 2>&1 || kill -TERM "${DB_PID}" 2>/dev/null || true
 		wait "${DB_PID}" 2>/dev/null || true
 	fi
-	echo "[Lizzart All-in-One] Aplicação e MariaDB encerrados com segurança."
+	echo "[Lizzart All-in-One] Nginx, Aplicação e MariaDB encerrados com segurança."
 	exit 0
 }
 
 trap shutdown_all SIGTERM SIGINT SIGQUIT
 
-# Supervise both MariaDB and App: if either dies unexpectedly, cleanly stop the other
+# Supervise Nginx, MariaDB and App: if any dies unexpectedly, cleanly stop the others
 while true; do
+	if ! kill -0 "${NGINX_PID}" 2>/dev/null; then
+		echo "[Lizzart All-in-One] Nginx encerrou inesperadamente. Reiniciando Nginx..." >&2
+		nginx -g "daemon off;" &
+		NGINX_PID=$!
+	fi
 	if ! kill -0 "${APP_PID}" 2>/dev/null; then
 		wait "${APP_PID}" || APP_CODE=$?
-		echo "[Lizzart All-in-One] Aplicação encerrou (code=${APP_CODE:-0}). Desligando MariaDB com segurança..." >&2
+		echo "[Lizzart All-in-One] Aplicação encerrou (code=${APP_CODE:-0}). Desligando Nginx e MariaDB com segurança..." >&2
+		kill -TERM "${NGINX_PID}" 2>/dev/null || true
 		mariadb-admin --socket=/run/mysqld/mysqld.sock shutdown >/dev/null 2>&1 || kill -TERM "${DB_PID}" 2>/dev/null || true
 		wait "${DB_PID}" 2>/dev/null || true
 		exit "${APP_CODE:-1}"
 	fi
 	if ! kill -0 "${DB_PID}" 2>/dev/null; then
-		echo "[Lizzart All-in-One] MariaDB encerrou inesperadamente. Parando aplicação..." >&2
+		echo "[Lizzart All-in-One] MariaDB encerrou inesperadamente. Parando Nginx e aplicação..." >&2
+		kill -TERM "${NGINX_PID}" 2>/dev/null || true
 		kill -TERM "${APP_PID}" 2>/dev/null || true
 		wait "${APP_PID}" 2>/dev/null || true
 		exit 1
