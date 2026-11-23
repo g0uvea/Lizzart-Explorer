@@ -1,5 +1,7 @@
 # Workspaces, Arquivos & Transferências Retomáveis
 
+> **Procurando um passo a passo simples para aprender a usar o sistema?** Leia primeiro o **[Guia do Usuário](GUIA-DO-USUARIO.md)**. Este documento detalha as regras internas e técnicas de funcionamento.
+
 ---
 
 ## 1. Workspaces Desacopladas dos Usuários

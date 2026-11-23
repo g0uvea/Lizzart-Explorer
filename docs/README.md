@@ -1,16 +1,27 @@
 # Documentação — Lizzart Explorer
 
-Bem-vindo à documentação técnica e operacional do **Lizzart Explorer**.
+Bem-vindo à documentação do **Lizzart Explorer**. Escolha o guia ideal para o que você precisa agora:
 
-## Guias Disponíveis
+---
 
-1. **[Guia de Instalação](INSTALACAO.md)**
-   Passo a passo completo para rodar com a imagem **Docker All-in-One (MariaDB + App)**, importar o pacote `.tar.gz` exportado, configurar proxy reverso externo (HTTPS), ou instalar localmente com Bun + MariaDB.
-2. **[Arquitetura & Banco de Dados](ARQUITETURA.md)**
-   Visão geral da stack, estrutura de diretórios, modelo de tabelas no MariaDB (`schema.sql`) e organização física dos arquivos em disco (`blobs`, `chunks`, `avatars`, `backups`).
-3. **[Segurança & Criptografia](SEGURANCA.md)**
-   Detalhes sobre JWT assimétrico **EdDSA (Ed25519)**, **Refresh Token Rotation** com detecção de reuso, **Argon2id**, **AES-256-GCM** para segredos 2FA TOTP, proteção CSRF e headers HTTP.
-4. **[Workspaces, Arquivos & Transferências Retomáveis](WORKSPACES-E-ARQUIVOS.md)**
-   Funcionamento das Workspaces desacopladas de usuários, cotas, compartilhamento, recorte lossless de imagens, uploads em blocos adaptativos (**8 MB → 20 MB**) e downloads/uploads resistentes a quedas de energia e rede.
-5. **[Administração, Desempenho & Backups](ADMINISTRACAO-E-OPERACAO.md)**
-   Painel Administrativo (`/admin`), tabela completa dos 4 perfis de desempenho, backup e restauração do MariaDB, auditoria e referência do `Makefile`.
+## 1. Aprenda a Usar o Sistema
+- **[Guia do Usuário](GUIA-DO-USUARIO.md)**
+  Comece por aqui! Explica de forma simples como funcionam as workspaces, como enviar e baixar arquivos, compartilhar com a equipe ou por link público, editar imagens PNG, ativar 2FA e personalizar seu perfil.
+
+---
+
+## 2. Instalação e Administração
+- **[Guia de Instalação](INSTALACAO.md)**
+  Passo a passo para rodar com Docker (imagem única com MariaDB + App), importar o arquivo `.tar.gz`, configurar domínio com HTTPS e atualizar mantendo seus dados.
+- **[Administração, Desempenho & Backups](ADMINISTRACAO-E-OPERACAO.md)**
+  Guia prático do Painel Admin (`/admin`): criação de workspaces e usuários, escolha do perfil de desempenho ideal para o seu hardware, backups automáticos/restauração e uso da CLI.
+
+---
+
+## 3. Referência Técnica (Avançado)
+- **[Workspaces, Arquivos & Transferências](WORKSPACES-E-ARQUIVOS.md)**
+  Detalhes técnicos de permissões, streaming, retomada de uploads/downloads com IndexedDB e controle adaptativo de blocos (8 MB → 20 MB).
+- **[Arquitetura & Banco de Dados](ARQUITETURA.md)**
+  Estrutura de pastas do projeto, organização física em disco (`blobs`, `chunks`, `avatars`, `backups`) e modelo de tabelas no MariaDB.
+- **[Segurança & Criptografia](SEGURANCA.md)**
+  Implementação de JWT EdDSA (Ed25519), rotação de refresh tokens com detecção de reuso, Argon2id, 2FA com AES-256-GCM e proteção CSRF.
