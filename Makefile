@@ -9,7 +9,7 @@ E2E_PORT ?= 3845
 DIST_DIR ?= dist
 EXPORT_FILE := $(DIST_DIR)/lizzart-explorer-allinone.tar.gz
 
-.PHONY: help install dev build start db-init check test test-docker \
+.PHONY: help install dev build start db-init reset check test test-docker \
         docker-build deploy docker-load docker-up docker-down docker-logs clean
 
 help: ## Mostra todos os comandos disponíveis
@@ -28,6 +28,9 @@ dev: ## Executa o servidor de desenvolvimento local (http://localhost:5173)
 
 db-init: ## Inicializa/atualiza o schema no MariaDB local configurado no .env
 	bun run db:init
+
+reset: ## Reseta completamente o ambiente de desenvolvimento (banco MariaDB, storage local e cache) para testar do zero (/setup)
+	bun run scripts/reset-dev.ts
 
 build: ## Gera o build de produção SvelteKit (build/)
 	bun run build
